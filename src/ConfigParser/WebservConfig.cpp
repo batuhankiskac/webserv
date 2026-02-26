@@ -1,18 +1,19 @@
-#include "Config.hpp"
+#include "ServerBlock.hpp"
+#include "WebservConfig.hpp"
 #include <cstddef>
 #include <fstream>
 #include <stdexcept>
 #include <cctype>
 
-Config::Config(const std::string& filename) {
+WebservConfig::WebservConfig(const std::string& filename) {
 	_extractFromFile(filename);
 	_tokenize();
 	_parse();
 }
 
-Config::~Config() { }
+WebservConfig::~WebservConfig() { }
 
-void Config::_extractFromFile(const std::string& filename) {
+void WebservConfig::_extractFromFile(const std::string& filename) {
 	std::ifstream file(filename.c_str());
 	if (!file.is_open()) {
 		throw std::runtime_error("Error opening file: " + filename);
@@ -40,7 +41,7 @@ void Config::_extractFromFile(const std::string& filename) {
 	file.close();
 }
 
-void Config::_tokenize() {
+void WebservConfig::_tokenize() {
 	std::string current = "";
 
 	for (size_t i = 0; i < _raw.length(); ++i) {
@@ -50,7 +51,7 @@ void Config::_tokenize() {
 			}
 			_tokens.push_back(current);
 			current = "";
-		} else if (_raw[i] == '{' || _raw[i] == '}') {
+		} else if (_raw[i] == '{' || _raw[i] == '}' || _raw[i] == ';') {
 			if (!current.empty()) {
 				_tokens.push_back(current);
 				current = "";
@@ -66,11 +67,29 @@ void Config::_tokenize() {
 	}
 }
 
-void Config::_parse() {
-	// TODO: Implement parsing
+void WebservConfig::_parse() {
+	size_t i = 0;
+
+	while (i < _tokens.size()) {
+		if (_tokens[i] == "server") {
+
+			if (i + 1 >= _tokens.size() || _tokens[i + 1] != "{") {
+				throw std::runtime_error("Invalid server block");
+			}
+
+			ServerBlock block;
+			block.parseServerBlock(_tokens, i);
+			_servers.push_back(block);
+		} else {
+			throw std::runtime_error("Invalid token: " + _tokens[i]);
+		}
+	}
+
+	if (_servers.empty()) {
+		throw std::runtime_error("No server blocks found");
+	}
 }
 
-const std::vector<ServerConfig>& Config::getServers() const {
+const std::vector<ServerBlock>& WebservConfig::getServers() const {
 	return _servers;
 }
-

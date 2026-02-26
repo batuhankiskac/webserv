@@ -42,4 +42,4 @@
 
 # clang
 compile_commands.json
-
+.cache
