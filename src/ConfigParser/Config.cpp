@@ -13,7 +13,7 @@ Config::Config(const std::string& filename) {
 Config::~Config() { }
 
 void Config::_extractFromFile(const std::string& filename) {
-	std::ifstream file(filename);
+	std::ifstream file(filename.c_str());
 	if (!file.is_open()) {
 		throw std::runtime_error("Error opening file: " + filename);
 	}
