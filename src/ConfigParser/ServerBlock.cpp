@@ -20,7 +20,9 @@ void ServerBlock::_setupDirectives() {
 }
 
 void ServerBlock::parseServerBlock(const std::vector<std::string>& _tokens, size_t& i) {
-	if (i + 1 >= _tokens.size() || _tokens[i + 1] != "{") {
+	i++;
+
+	if (i >= _tokens.size() || _tokens[i] != "{") {
 		throw std::runtime_error("Invalid server block");
 	}
 	i++;
@@ -103,10 +105,9 @@ void ServerBlock::_parseErrorPage(const std::vector<std::string>& _tokens, size_
 
 	std::string path = values.back();
 	values.pop_back();
-	for (size_t j = 0; j < values.size() - 1; j++) {
+	for (size_t j = 0; j < values.size(); j++) {
 		_errorPages[values[j]] = path;
 	}
-	i++;
 }
 
 void ServerBlock::_parseClientMaxBodySize(const std::vector<std::string>& _tokens, size_t& i) {
@@ -137,7 +138,10 @@ void ServerBlock::_parseClientMaxBodySize(const std::vector<std::string>& _token
 			value = value.substr(0, value.size() - 1);
 			break;
 		default:
-			throw std::runtime_error("Invalid client_max_body_size directive");
+			if (!std::isdigit(unit)) {
+				throw std::runtime_error("Invalid client_max_body_size directive");
+			}
+			break;
 	}
 
 	std::stringstream ss(value);
