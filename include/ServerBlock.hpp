@@ -41,10 +41,10 @@ public:
 
 	void setPort(int port) { _port = port; }
 	void setClientMaxBodySize(size_t clientMaxBodySize) { _clientMaxBodySize = clientMaxBodySize; }
-	void setIp(std::string ip) { _ip = ip; }
-	void setErrorPages(std::map<std::string, std::string> errorPages) { _errorPages = errorPages; }
-	void setLocations(std::vector<LocationBlock> locations) { _locations = locations; }
-	void setServerNames(std::vector<std::string> serverNames) { _serverNames = serverNames; }
+	void setIp(const std::string& ip) { _ip = ip; }
+	void setErrorPages(const std::map<std::string, std::string>& errorPages) { _errorPages = errorPages; }
+	void setLocations(const std::vector<LocationBlock>& locations) { _locations = locations; }
+	void setServerNames(const std::vector<std::string>& serverNames) { _serverNames = serverNames; }
 };
 
 #endif

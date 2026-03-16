@@ -119,6 +119,11 @@ void ServerBlock::_parseClientMaxBodySize(const std::vector<std::string>& _token
 
 	std::string value = _tokens[i++];
 	size_t multiplier = 1;
+
+	if (value.empty()) {
+		throw std::runtime_error("Invalid client_max_body_size directive");
+	}
+
 	char unit = value[value.size() - 1];
 
 	switch (unit) {
@@ -148,6 +153,10 @@ void ServerBlock::_parseClientMaxBodySize(const std::vector<std::string>& _token
 	size_t size;
 	ss >> size;
 	if (ss.fail()) {
+		throw std::runtime_error("Invalid client_max_body_size directive");
+	}
+
+	if (multiplier > 0 && size > (size_t)-1 / multiplier) {
 		throw std::runtime_error("Invalid client_max_body_size directive");
 	}
 

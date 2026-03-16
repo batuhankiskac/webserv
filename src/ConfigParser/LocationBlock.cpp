@@ -168,10 +168,9 @@ void LocationBlock::_parseReturn(const std::vector<std::string>& _tokens, size_t
 		throw std::runtime_error("Invalid return directive");
 	}
 
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid return directive");
+	if (i < _tokens.size() && _tokens[i] != ";") {
+		_returnUrl = _tokens[i++];
 	}
-	_returnUrl = _tokens[i++];
 	if (i >= _tokens.size() || _tokens[i] != ";") {
 		throw std::runtime_error("Invalid return directive");
 	}
