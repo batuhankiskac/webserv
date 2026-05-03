@@ -45,7 +45,9 @@ int Server::getSocketFd( void ) const
 	return (socketFd);
 }
 
+Server::SocketCreationError::SocketCreationError() : _errno(errno) {}
+
 const char* Server::SocketCreationError::what() const throw()
 {
-	return (std::strerror(errno));
+	return (std::strerror(_errno));
 }

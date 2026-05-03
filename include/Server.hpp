@@ -24,7 +24,12 @@ class Server
 
 		class SocketCreationError : public std::exception
 		{
-			virtual const char* what() const throw();
+			private:
+				int	_errno;
+			
+			public:
+				SocketCreationError();
+				virtual const char* what() const throw();
 		};
 };
 
