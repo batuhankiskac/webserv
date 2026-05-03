@@ -5,6 +5,9 @@
 #include <cstring>
 #include <cerrno>
 #include <sys/socket.h>
+#include <sys/epoll.h>
+#include <vector>
+#include <unistd.h>
 
 class ListenAndAcceptReqs
 {
@@ -13,9 +16,17 @@ class ListenAndAcceptReqs
 		~ListenAndAcceptReqs();
 
 	private:
+		int	epollFd;
+		std::vector<struct epoll_event> epollEvents;
+
 		class ListenOrAcceptionError : public std::exception
 		{
-			virtual const char* what() const throw();
+			private:
+				int	_errno;
+
+			public:
+				ListenOrAcceptionError();
+				virtual const char* what() const throw();
 		};
 };
 
