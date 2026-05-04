@@ -8,16 +8,28 @@
 #include <sys/epoll.h>
 #include <vector>
 #include <unistd.h>
+#include <fcntl.h>
+#include <iostream>
+#include <map>
+
+#include "Client.hpp"
+
+#define BUFFER_SIZE 64
+#define TIME_OUT	30
+#define MAX_TOUR	10
 
 class ListenAndAcceptReqs
 {
 	public:
 		ListenAndAcceptReqs(const int socketFd);
 		~ListenAndAcceptReqs();
+		void	waitReqs();
 
 	private:
 		int	epollFd;
+		int	socketFd;
 		std::vector<struct epoll_event> epollEvents;
+		std::map<int, Client> clients;
 
 		class ListenOrAcceptionError : public std::exception
 		{
