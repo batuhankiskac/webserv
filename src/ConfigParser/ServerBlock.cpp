@@ -19,6 +19,52 @@ void ServerBlock::_setupDirectives() {
 	_directives["location"] = &ServerBlock::_parseLocation;
 }
 
+size_t ServerBlock::_parseSizeWithUnit(const std::string& value, const std::string& name) {
+	if (value.empty()) {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+
+	size_t multiplier = 1;
+	std::string numStr = value;
+	char unit = value[value.size() - 1];
+
+	switch (unit) {
+		case 'k':
+		case 'K':
+			multiplier = 1024;
+			numStr = value.substr(0, value.size() - 1);
+			break;
+		case 'm':
+		case 'M':
+			multiplier = 1024 * 1024;
+			numStr = value.substr(0, value.size() - 1);
+			break;
+		case 'g':
+		case 'G':
+			multiplier = 1024 * 1024 * 1024;
+			numStr = value.substr(0, value.size() - 1);
+			break;
+		default:
+			if (!std::isdigit(unit)) {
+				throw std::runtime_error("Invalid " + name + " directive");
+			}
+			break;
+	}
+
+	std::stringstream ss(numStr);
+	size_t size;
+	ss >> size;
+	if (ss.fail()) {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+
+	if (multiplier > 0 && size > (size_t)-1 / multiplier) {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+
+	return size * multiplier;
+}
+
 void ServerBlock::parseServerBlock(const std::vector<std::string>& _tokens, size_t& i) {
 	i++;
 
@@ -118,49 +164,7 @@ void ServerBlock::_parseClientMaxBodySize(const std::vector<std::string>& _token
 	}
 
 	std::string value = _tokens[i++];
-	size_t multiplier = 1;
-
-	if (value.empty()) {
-		throw std::runtime_error("Invalid client_max_body_size directive");
-	}
-
-	char unit = value[value.size() - 1];
-
-	switch (unit) {
-		case 'k':
-		case 'K':
-			multiplier = 1024;
-			value = value.substr(0, value.size() - 1);
-			break;
-		case 'm':
-		case 'M':
-			multiplier = 1024 * 1024;
-			value = value.substr(0, value.size() - 1);
-			break;
-		case 'g':
-		case 'G':
-			multiplier = 1024 * 1024 * 1024;
-			value = value.substr(0, value.size() - 1);
-			break;
-		default:
-			if (!std::isdigit(unit)) {
-				throw std::runtime_error("Invalid client_max_body_size directive");
-			}
-			break;
-	}
-
-	std::stringstream ss(value);
-	size_t size;
-	ss >> size;
-	if (ss.fail()) {
-		throw std::runtime_error("Invalid client_max_body_size directive");
-	}
-
-	if (multiplier > 0 && size > (size_t)-1 / multiplier) {
-		throw std::runtime_error("Invalid client_max_body_size directive");
-	}
-
-	_clientMaxBodySize = size * multiplier;
+	_clientMaxBodySize = _parseSizeWithUnit(value, "client_max_body_size");
 
 	if (i >= _tokens.size() || _tokens[i] != ";") {
 		throw std::runtime_error("Invalid client_max_body_size directive");
