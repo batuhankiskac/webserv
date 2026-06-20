@@ -27,17 +27,6 @@ ListenAndAcceptReqs::ListenAndAcceptReqs(const int socketFd)
 
 ListenAndAcceptReqs::~ListenAndAcceptReqs()
 {
-	if (clients.size() != 0)
-	{
-		for (std::map<int, struct Client>::iterator it = clients.begin();
-			it != clients.end(); ++it)
-		{
-			if (it->second.clientFd != -1)
-			{
-				close(it->second.clientFd);
-			}
-		}
-	}
 	clients.clear();
 	close(epollFd);
 }
