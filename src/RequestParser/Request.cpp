@@ -1,0 +1,277 @@
+#include "Request.hpp"
+#include "Client.hpp"
+
+static int	getContentLength(std::string& header)
+{
+	if (header.empty())
+		return (-1);
+
+	const std::string search = "Content-Length: ";
+	size_t pos = header.find(search);
+	if (pos == std::string::npos)
+		return (-1);
+
+	pos += search.length();
+	std::string length_str = "";
+	while (pos < header.length() && std::isdigit(header[pos]))
+	{
+		length_str += header[pos];
+		pos++;
+	}
+
+	if (length_str.empty())
+		return (-1);
+
+	std::stringstream	ss(length_str);
+	int result;
+	ss >> result;
+
+	return (result);
+}
+
+static bool	isChunked(std::string& header)
+{
+	std::string	header_lower = header;
+	std::transform(header_lower.begin(), header_lower.end(), 
+					header_lower.begin(), ::tolower);
+	
+	return (header_lower.find("transfer-encoding") != std::string::npos &&
+			header_lower.find("chunked") != std::string::npos);
+}
+
+static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fileFd)
+{
+	while (!rawBuffer.empty())
+	{
+		std::size_t	crlf_pos = rawBuffer.find("\r\n");
+		if (crlf_pos == std::string::npos)
+			return (1);
+
+		std::string	size_line = rawBuffer.substr(0, crlf_pos);
+
+		std::size_t semi_pos = size_line.find(';');
+		std::string size_str;
+
+		if (semi_pos != std::string::npos) 
+		{
+			if (size_line.length() > CHUNK_SEMI_SIZE) 
+				return (-HTTP_URI_TOO_LONG);
+
+			size_str = size_line.substr(0, semi_pos);
+		} 
+		else 
+		{
+			size_str = size_line;
+		}
+		
+		char* end_ptr;
+		long chunk_size = std::strtol(size_str.c_str(), &end_ptr, 16);
+
+		if ((*end_ptr != '\0' && *end_ptr != ' ' && *end_ptr != '\t') || 
+				(chunk_size < 0))
+		{
+			return (-HTTP_BAD_REQUEST);
+		}
+
+		if (chunk_size == 0)
+		{
+			if (rawBuffer.length() >= crlf_pos + 4)
+			{
+				if (rawBuffer.compare(crlf_pos + 2, 2, "\r\n") == 0)
+				{
+					rawBuffer.erase(0, crlf_pos + 4);
+					return (0);
+				}
+				return (-HTTP_BAD_REQUEST);
+			}
+			return (1);
+		}
+
+		std::size_t total_chunk_bytes = crlf_pos + 2 + chunk_size + 2;
+		
+		if (rawBuffer.length() < total_chunk_bytes)
+			return (1);
+
+		if (rawBuffer.compare(crlf_pos + 2 + chunk_size, 2, "\r\n") != 0)
+		{
+			return (-HTTP_BAD_REQUEST);
+		}
+
+		if (bodyReceived + chunk_size > MAX_BODY_SIZE)
+		{
+			return (-HTTP_PAYLOAD_TOO_LARGE);
+		}
+		ssize_t written = write(fileFd, rawBuffer.c_str() + crlf_pos + 2, chunk_size);
+		if (written == -1 || written != chunk_size)
+		{
+			return (-errno);
+		}
+		else
+		{
+			bodyReceived += written;
+		}
+
+		rawBuffer.erase(0, total_chunk_bytes);
+	}
+
+	return (1); 
+}
+
+int Request::readFd(struct Client &client, File& file)
+{
+	_errno = 0;
+	if (client.clientFd == -1)
+	{
+		_errno = -1;
+		return (-1);
+	}
+
+	while (1)
+	{
+		char buffer[MAX_REQUEST_LINE];
+		int	result = recv(client.clientFd, buffer, sizeof(buffer), 0);
+		if (result == -1)
+		{
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return (1);
+
+			_errno = errno;
+			return (-1);
+		}
+		else if (result == 0)
+		{
+			_errno = -1;
+			return (0);
+		}
+		else
+		{
+			client.rawBuffer.append(buffer, result);
+
+			if (client.state == READING_HEADERS)
+			{
+				if (client.rawBuffer.size()> MAX_HEADERS_SIZE)
+				{
+					_errno = -HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
+					return (-1);
+				}
+
+				std::string &req = client.rawBuffer;
+
+				std::size_t pos = req.find("\r\n\r\n");
+				if (pos != std::string::npos)
+				{
+					client.requestHeader = req.substr(0, pos);
+					req.erase(0, pos + 4);
+
+					client.contentLength = getContentLength(client.requestHeader);
+					if (isChunked(client.requestHeader))
+					{
+						client.state = READING_CHUNKS;
+					}
+					else if (client.contentLength > 0)
+					{
+						if (client.contentLength >= MAX_BODY_SIZE)
+						{
+							_errno = -HTTP_PAYLOAD_TOO_LARGE;
+							return (-1);
+						}
+						client.state = READING_BODY;
+					}
+					else if (client.contentLength == 0)
+					{
+						client.state = REQUEST_COMPLETE;
+					}
+					else
+					{
+						client.state = REQUEST_COMPLETE;
+					}
+				}
+			}
+			if (client.state == READING_BODY)
+			{
+				const int val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived) 
+									? (client.contentLength - client.bodyReceived) : client.rawBuffer.size();
+
+				if (client.bodyReceived + val > client.contentLength)
+				{
+					_errno = -HTTP_PAYLOAD_TOO_LARGE;
+					return (-1);
+				}
+				if (client.contentLength <= MAX_REQUEST_LINE)
+				{
+					client.bodyReceived += val;
+					client.requestBody.append(client.rawBuffer.substr(0, val));
+					client.rawBuffer.erase(0, val);
+					if (client.bodyReceived == client.contentLength)
+						client.state = REQUEST_COMPLETE;
+				}
+				else
+				{
+					if (client.requestBodyFd == -1)
+					{
+						client.requestBodyFd = file.getNewFileFd(client.clientFd);
+						if (client.requestBodyFd == -1)
+						{
+							_errno = -2;
+							return (-1);
+						}
+					}
+					client.bodyReceived += val;
+					const int written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
+					if (written == -1)
+					{
+						_errno = errno;
+						return (-1);
+					}
+					else if (written != val)
+					{
+						client.rawBuffer.erase(0, written);
+						return (1);
+					}
+					client.rawBuffer.erase(0, val);
+					if (client.bodyReceived == client.contentLength)
+						client.state = REQUEST_COMPLETE;
+				}
+			}
+			if (client.state == READING_CHUNKS)
+			{
+				if (client.requestBodyFd == -1)
+				{
+					client.requestBodyFd = file.getNewFileFd(client.clientFd);
+					if (client.requestBodyFd == -1)
+					{
+						_errno = -2;
+						return (-1);
+					}
+				}
+				const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd);
+				if (!result)
+				{
+					close(client.requestBodyFd);
+					client.state = REQUEST_COMPLETE;
+				}
+				else if (result < 0)
+				{
+					if (result <= -HTTP_BAD_REQUEST)
+						_errno = result;
+					else
+						_errno = -result;
+					close(client.requestBodyFd);
+					return (-1);
+				}
+			}
+			if (client.state == REQUEST_COMPLETE)
+			{
+				_errno = 0;
+				return (0);
+			}
+		}
+	}
+	return (1);
+}
+
+int	Request::getErrno()
+{
+	return (_errno);
+}
+
