@@ -11,17 +11,20 @@
 #include <fcntl.h>
 #include <iostream>
 #include <map>
+#include <ctime>
 
 #include "Client.hpp"
+#include "Request.hpp"
+#include "File.hpp"
 
 #define BUFFER_SIZE 64
 #define TIME_OUT	30
-#define MAX_TOUR	10
+#define MAX_TOUR	50
 
 class ListenAndAcceptReqs
 {
 	public:
-		ListenAndAcceptReqs(const int socketFd);
+		ListenAndAcceptReqs(const int socketFd, File& file);
 		~ListenAndAcceptReqs();
 		void	waitReqs();
 
@@ -30,6 +33,8 @@ class ListenAndAcceptReqs
 		int	socketFd;
 		std::vector<struct epoll_event> epollEvents;
 		std::map<int, Client> clients;
+
+		File& file;
 
 		class ListenOrAcceptionError : public std::exception
 		{

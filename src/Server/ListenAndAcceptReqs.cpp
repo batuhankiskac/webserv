@@ -1,6 +1,7 @@
 #include "ListenAndAcceptReqs.hpp"
 
-ListenAndAcceptReqs::ListenAndAcceptReqs(const int socketFd)
+ListenAndAcceptReqs::ListenAndAcceptReqs(const int socketFd, File& file)
+	: file(file)
 {
 	this->socketFd = socketFd;
 	if (listen(socketFd, SOMAXCONN) < 0)
@@ -41,27 +42,30 @@ const char* ListenAndAcceptReqs::ListenOrAcceptionError::what() const throw()
 
 void	ListenAndAcceptReqs::waitReqs()
 {
+	const int TICK_RATE = 1;
 	epollEvents.resize(BUFFER_SIZE);
 
-	int	timeout = TIME_OUT;
+	time_t	lastTick = time(NULL);
 	int	tour = 0;
 	std::map<int, int> fdTargetTour;
 	std::vector<std::vector<int> > timerWheel(MAX_TOUR);
 
 	while (true)
 	{
-		if (timeout == 0)
+		const time_t now = time(NULL);
+
+		while (now - lastTick >= TICK_RATE)
 		{
-			timeout = TIME_OUT;
+			lastTick += TICK_RATE;
 			tour = (tour + 1) % MAX_TOUR;
 
-			for (int i = 0; i < timerWheel[tour].size(); i++)
+			for (std::size_t i = 0; i < timerWheel[tour].size(); i++)
 			{
 				int	expired_fd = timerWheel[tour].at(i);
 				if (expired_fd == -1)
 					continue ;
 
-				if (fdTargetTour[expired_fd] == tour)
+				if (fdTargetTour.count(expired_fd) && fdTargetTour[expired_fd] == tour)
 				{
 					epoll_ctl(epollFd, EPOLL_CTL_DEL, expired_fd, NULL);
 					close(expired_fd);
@@ -72,7 +76,7 @@ void	ListenAndAcceptReqs::waitReqs()
 			timerWheel[tour].clear(); 
 		}
 
-		int	readyNum = epoll_wait(epollFd, &epollEvents[0], BUFFER_SIZE, timeout);
+		int	readyNum = epoll_wait(epollFd, &epollEvents[0], BUFFER_SIZE, 1000);
 		if (readyNum == -1)
 		{
 			if (errno == EINTR)
@@ -121,24 +125,87 @@ void	ListenAndAcceptReqs::waitReqs()
 					client.clientFd = clientSocket;
 					clients[clientSocket] = client;
 
-					fdTargetTour[clientSocket] = (tour + 2) % MAX_TOUR;
-					timerWheel[(tour + 2) % MAX_TOUR].push_back(clientSocket);
+					fdTargetTour[clientSocket] = (tour + TIME_OUT) % MAX_TOUR;
+					timerWheel[(tour + TIME_OUT) % MAX_TOUR].push_back(clientSocket);
 				}
 				else
 				{
-					int	newTourNum = (tour + 2) % MAX_TOUR;
-					if (fdTargetTour[currentFd] != newTourNum)
+					int	update = 0;
+					bool disconnect = false;
+
+					const int result = Request::readFd(clients[currentFd], file);
+					if (!result && !Request::getErrno())
+					{
+						update = 1;
+						// istek başarılı. Yanıt oluştur.
+					}
+					else if (!result && Request::getErrno() == -1)
+					{
+						disconnect = true;
+					}
+					else if (result > 0)
+					{
+						update = 1;
+					}
+					else
+					{
+						const int	_errno = Request::getErrno();
+						if (_errno == -1)
+						{
+							// Does nothing. 
+						}
+						else if (_errno > 0)
+						{
+							if (_errno == ECONNRESET || _errno == EPIPE || _errno == ETIMEDOUT)
+							{
+								disconnect = true;
+							}
+							else
+							{
+								// 2. Disk (I/O) Hataları: Disk doldu (ENOSPC), I/O hatası (EIO) vb.
+								// 500
+								// TODO: Soketi EPOLLOUT (Yazma) moduna geçir
+							}
+						}
+						else if (_errno == -2)
+						{
+							const int err = this->file.getErr();
+							if (err == EMFILE || err == ENFILE)
+							{
+								// Sunucu kapasite limitlerine çarptıysa (Too many open files)
+								// 503
+							}
+							else
+							{
+								// 500
+							}
+							// TODO: Soketi EPOLLOUT (Yazma) moduna geçir
+						}
+						else
+						{
+							disconnect = true;
+							// http hataları - halleri ile.
+							// HATAYA göre yanıt ile socket'i kapat.
+						}
+					}
+
+					if (disconnect)
+					{
+						epoll_ctl(epollFd, EPOLL_CTL_DEL, currentFd, NULL);
+						close(currentFd);
+						fdTargetTour.erase(currentFd);
+						clients.erase(currentFd);
+						continue ;
+					}
+					
+					int	newTourNum = (tour + TIME_OUT) % MAX_TOUR;
+					if (update && 
+						fdTargetTour[currentFd] != newTourNum)
 					{
 						timerWheel[newTourNum].push_back(currentFd);
 						fdTargetTour[currentFd] = newTourNum;
 					}
-
-					// PROGRAM MUST RUN A CLASS THAT CLASS WILL DO JOB FOR REQ.
 				}
-				// Program yeni gelen baglantiyi aliyor.
-				// Eskisi cok eskirse cikariyor.
-				// Artık parçalanan paketlere bakmalı.
-				// İstekleri irdelemeli.
 			}
 		}
 	}
