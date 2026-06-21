@@ -8,8 +8,4 @@ Client::Client() :
 		state(READING_HEADERS)
 {}
 
-Client::~Client()
-{
-	if (clientFd != -1)
-		close(clientFd);
-}
+Client::~Client() {}
