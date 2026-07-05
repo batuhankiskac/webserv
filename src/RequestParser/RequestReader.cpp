@@ -1,4 +1,4 @@
-#include "Request.hpp"
+#include "RequestReader.hpp"
 #include "Client.hpp"
 
 static int	getContentLength(std::string& header)
@@ -117,7 +117,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 	return (1); 
 }
 
-int Request::readFd(struct Client &client, File& file)
+int RequestReader::readFd(struct Client &client, File& file)
 {
 	_errno = 0;
 	if (client.clientFd == -1)
@@ -270,7 +270,7 @@ int Request::readFd(struct Client &client, File& file)
 	return (1);
 }
 
-int	Request::getErrno()
+int	RequestReader::getErrno()
 {
 	return (_errno);
 }

@@ -1,5 +1,5 @@
-#ifndef REQUEST_HPP
-#define REQUEST_HPP
+#ifndef REQUEST_READER_HPP
+#define REQUEST_READER_HPP
 
 #include <sys/socket.h>
 #include <errno.h>
@@ -18,7 +18,7 @@
 #define MAX_HEADERS_SIZE	32768
 #define MAX_BODY_SIZE		1048576
 
-class Request
+class RequestReader
 {
 	private:
 		static int	_errno;
@@ -28,4 +28,4 @@ class Request
 		static int	getErrno();
 };
 
-#endif // REQUEST_HPP
+#endif // REQUEST_READER_HPP

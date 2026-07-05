@@ -133,13 +133,13 @@ void	ListenAndAcceptReqs::waitReqs()
 					int	update = 0;
 					bool disconnect = false;
 
-					const int result = Request::readFd(clients[currentFd], file);
-					if (!result && !Request::getErrno())
+					const int result = RequestReader::readFd(clients[currentFd], file);
+					if (!result && !RequestReader::getErrno())
 					{
 						update = 1;
 						// istek başarılı. Yanıt oluştur.
 					}
-					else if (!result && Request::getErrno() == -1)
+					else if (!result && RequestReader::getErrno() == -1)
 					{
 						disconnect = true;
 					}
@@ -149,7 +149,7 @@ void	ListenAndAcceptReqs::waitReqs()
 					}
 					else
 					{
-						const int	_errno = Request::getErrno();
+						const int	_errno = RequestReader::getErrno();
 						if (_errno == -1)
 						{
 							// Does nothing. 
