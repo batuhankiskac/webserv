@@ -4,6 +4,8 @@
 #include <string>
 #include <unistd.h>
 
+#include "RequestParser.hpp"
+
 enum RequestState
 {
 	READING_HEADERS,
@@ -26,6 +28,8 @@ struct Client
 	std::string requestBody;
 
 	std::string	response;
+
+	RequestParser	request;
 
 	Client();
 	~Client();

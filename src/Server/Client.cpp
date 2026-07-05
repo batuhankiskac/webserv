@@ -4,8 +4,12 @@ Client::Client() :
 		clientFd(-1),
 		requestBodyFd(-1),
 		contentLength(-1),
-		bodyReceived(0),
-		state(READING_HEADERS)
+		state(READING_HEADERS),
+		bodyReceived(0)
 {}
 
-Client::~Client() {}
+Client::~Client()
+{
+	if (requestBodyFd != -1)
+		close(requestBodyFd);
+}

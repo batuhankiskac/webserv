@@ -1,229 +1,247 @@
 #include "Request.hpp"
-#include <sstream>
-#include <algorithm>
-#include <cctype>
+#include "Client.hpp"
 
-Request::Request(size_t maxBodySize) :
-	_phase(REQUEST),
-	_readIndex(0),
-	_contentLength(0),
-	_maxBodySize(maxBodySize),
-	_currentChunkSize(0),
-	_isChunked(false),
-	_errorCode(0) { }
+int	Request::_errno = 0;
 
-Request::~Request() { }
+static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fileFd)
+{
+	while (!rawBuffer.empty())
+	{
+		std::size_t	crlf_pos = rawBuffer.find("\r\n");
+		if (crlf_pos == std::string::npos)
+			return (1);
 
-std::string Request::_getNextLine() {
-	size_t pos = _buffer.find("\r\n", _readIndex);
-	if (pos == std::string::npos) {
-		return "";
-	}
+		std::string	size_line = rawBuffer.substr(0, crlf_pos);
 
-	std::string line = _buffer.substr(_readIndex, pos - _readIndex);
-	_readIndex = pos + 2;
+		std::size_t semi_pos = size_line.find(';');
+		std::string size_str;
 
-	return line;
-}
+		if (semi_pos != std::string::npos) 
+		{
+			if (size_line.length() > CHUNK_SEMI_SIZE) 
+				return (-HTTP_URI_TOO_LONG);
 
-void Request::_flushBuffer() {
-	if (_readIndex > 0) {
-		_buffer.erase(0, _readIndex);
-		_readIndex = 0;
-	}
-}
-
-void Request::_setError(int code) {
-	_errorCode = code;
-	_phase = ERROR;
-}
-
-std::string Request::_trim(const std::string& str, const std::string& chars) {
-	size_t start = str.find_first_not_of(chars);
-	if (start == std::string::npos) {
-		return "";
-	}
-	size_t end = str.find_last_not_of(chars);
-	return str.substr(start, end - start + 1);
-}
-
-void Request::_parseRequestLine(const std::string& line) {
-	size_t methodEnd = line.find(' ');
-	if (methodEnd == std::string::npos) {
-		_setError(400);
-		return;
-	}
-
-	size_t pathEnd = line.find(' ', methodEnd + 1);
-	if (pathEnd == std::string::npos) {
-		_setError(400);
-		return;
-	}
-
-	_method = line.substr(0, methodEnd);
-	std::string fullPath = line.substr(methodEnd + 1, pathEnd - methodEnd - 1);
-	_httpVersion = line.substr(pathEnd + 1);
-
-	size_t queryPos = fullPath.find('?');
-	if (queryPos != std::string::npos) {
-		_path = fullPath.substr(0, queryPos);
-		_queryString = fullPath.substr(queryPos + 1);
-	} else {
-		_path = fullPath;
-		_queryString = "";
-	}
-
-	if (_httpVersion != "HTTP/1.1" && _httpVersion != "HTTP/1.0") {
-		_setError(505);
-		return;
-	}
-
-	_phase = HEADERS;
-}
-
-void Request::_parseHeaderLine(const std::string& line) {
-	size_t colonPos = line.find(':');
-	if (colonPos == std::string::npos) {
-		_setError(400);
-		return;
-	}
-
-	std::string key = line.substr(0, colonPos);
-	std::string value = _trim(line.substr(colonPos + 1));
-
-	_headers[key] = value;
-}
-
-void Request::_transitionToBody() {
-	std::map<std::string, std::string, CaseInsensitiveCompare>::iterator itChunk = _headers.find("transfer-encoding");
-	std::map<std::string, std::string, CaseInsensitiveCompare>::iterator itLength = _headers.find("content-length");
-
-	if (itChunk != _headers.end() && itChunk->second.find("chunked") != std::string::npos) {
-		_isChunked = true;
-		_phase = CHUNKED_SIZE;
-	} else if (itLength != _headers.end()) {
-		std::stringstream ss(itLength->second);
-		ss >> _contentLength;
-
-		if (ss.fail()) {
-			_setError(400);
-		} else if (_maxBodySize > 0 && _contentLength > _maxBodySize) {
-			_setError(413);
-		} else {
-			_phase = BODY;
+			size_str = size_line.substr(0, semi_pos);
+		} 
+		else 
+		{
+			size_str = size_line;
 		}
-	} else {
-		_phase = COMPLETE;
-	}
-}
+		
+		char* end_ptr;
+		long chunk_size = std::strtol(size_str.c_str(), &end_ptr, 16);
 
-bool Request::_handleRequestLine() {
-	std::string line = _getNextLine();
-	if (line.empty() && _buffer.find("\r\n", _readIndex) == std::string::npos) {
-		return false;
-	}
-	_parseRequestLine(line);
-	return true;
-}
-
-bool Request::_handleHeaders() {
-	std::string line = _getNextLine();
-	if (line.empty() && _buffer.find("\r\n", _readIndex) == std::string::npos) {
-		return false;
-	}
-	if (line.empty()) {
-		_transitionToBody();
-	} else {
-		_parseHeaderLine(line);
-	}
-	return true;
-}
-
-bool Request::_handleBody() {
-	size_t needed = _contentLength - _body.length();
-	size_t available = _buffer.length() - _readIndex;
-
-	size_t toRead = std::min(needed, available);
-
-	_body.append(_buffer, _readIndex, toRead);
-	_readIndex += toRead;
-
-	if (_body.length() == _contentLength) {
-		_phase = COMPLETE;
-		return true;
-	}
-	return false;
-}
-
-bool Request::_handleChunkedSize() {
-	std::string line = _getNextLine();
-	if (line.empty() && _buffer.find("\r\n", _readIndex) == std::string::npos) {
-		return false;
-	}
-
-	size_t semiPos = line.find(';');
-	if (semiPos != std::string::npos) {
-		line = line.substr(0, semiPos);
-	}
-
-	std::stringstream ss;
-	ss << std::hex << line;
-	ss >> _currentChunkSize;
-
-	if (ss.fail()) {
-		_setError(400);
-		return true;
-	}
-
-	if (_currentChunkSize == 0) {
-		std::string trailer = _getNextLine();
-		if (!trailer.empty() || _buffer.find("\r\n", _readIndex) != std::string::npos) {
-			_readIndex += 2;
-			_phase = COMPLETE;
+		if ((*end_ptr != '\0' && *end_ptr != ' ' && *end_ptr != '\t') || 
+				(chunk_size < 0))
+		{
+			return (-HTTP_BAD_REQUEST);
 		}
-		return true;
+
+		if (chunk_size == 0)
+		{
+			if (rawBuffer.length() >= crlf_pos + 4)
+			{
+				if (rawBuffer.compare(crlf_pos + 2, 2, "\r\n") == 0)
+				{
+					rawBuffer.erase(0, crlf_pos + 4);
+					return (0);
+				}
+				return (-HTTP_BAD_REQUEST);
+			}
+			return (1);
+		}
+
+		std::size_t total_chunk_bytes = crlf_pos + 2 + chunk_size + 2;
+		
+		if (rawBuffer.length() < total_chunk_bytes)
+			return (1);
+
+		if (rawBuffer.compare(crlf_pos + 2 + chunk_size, 2, "\r\n") != 0)
+		{
+			return (-HTTP_BAD_REQUEST);
+		}
+
+		if (bodyReceived + chunk_size > MAX_BODY_SIZE)
+		{
+			return (-HTTP_PAYLOAD_TOO_LARGE);
+		}
+		ssize_t written = write(fileFd, rawBuffer.c_str() + crlf_pos + 2, chunk_size);
+		if (written == -1 || written != chunk_size)
+		{
+			return (-errno);
+		}
+		else
+		{
+			bodyReceived += written;
+		}
+
+		rawBuffer.erase(0, total_chunk_bytes);
 	}
 
-	if (_maxBodySize > 0 && (_body.length() + _currentChunkSize) > _maxBodySize) {
-		_setError(413);
-		return true;
-	}
-
-	_phase = CHUNKED_DATA;
-	return true;
+	return (1); 
 }
 
-bool Request::_handleChunkedData() {
-	size_t available = _buffer.length() - _readIndex;
-	size_t needed = _currentChunkSize + 2;
-
-	if (available < needed) {
-		return false;
+int Request::readFd(struct Client &client, File& file)
+{
+	_errno = 0;
+	if (client.clientFd == -1)
+	{
+		_errno = -1;
+		return (-1);
 	}
 
-	_body.append(_buffer, _readIndex, _currentChunkSize);
-	_readIndex += needed;
-	_phase = CHUNKED_SIZE;
-	return true;
-}
+	while (1)
+	{
+		char buffer[MAX_REQUEST_LINE];
+		int	result = recv(client.clientFd, buffer, sizeof(buffer), 0);
+		if (result == -1)
+		{
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return (1);
 
-void Request::parse(const std::string& rawRequest) {
-	_buffer.append(rawRequest);
+			_errno = errno;
+			return (-1);
+		}
+		else if (result == 0)
+		{
+			_errno = -1;
+			return (0);
+		}
+		else
+		{
+			client.rawBuffer.append(buffer, result);
 
-	static bool (Request::*const handlers[])(void) = {
-		&Request::_handleRequestLine,
-		&Request::_handleHeaders,
-		&Request::_handleBody,
-		&Request::_handleChunkedSize,
-		&Request::_handleChunkedData
-	};
+			if (client.state == READING_HEADERS)
+			{
+				if (client.rawBuffer.size()> MAX_HEADERS_SIZE)
+				{
+					_errno = -HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
+					return (-1);
+				}
 
-	while (_phase != COMPLETE && _phase != ERROR) {
-		bool (Request::*handler)(void) = handlers[_phase];
-		if (!(this->*handler)()) {
-			break;
+				std::string &req = client.rawBuffer;
+
+				std::size_t pos = req.find("\r\n\r\n");
+				if (pos != std::string::npos)
+				{
+					client.requestHeader = req.substr(0, pos);
+					req.erase(0, pos + 4);
+
+					client.request.parse(client.requestHeader + "\r\n\r\n");
+					if (client.request.hasError())
+					{
+						_errno = -client.request.getErrorCode();
+						return (-1);
+					}
+					client.contentLength = client.request.getContentLength();
+					if (client.request.isChunked())
+					{
+						client.state = READING_CHUNKS;
+					}
+					else if (client.contentLength > 0)
+					{
+						if (client.contentLength >= MAX_BODY_SIZE)
+						{
+							_errno = -HTTP_PAYLOAD_TOO_LARGE;
+							return (-1);
+						}
+						client.state = READING_BODY;
+					}
+					else if (client.contentLength == 0)
+					{
+						client.state = REQUEST_COMPLETE;
+					}
+					else
+					{
+						client.state = REQUEST_COMPLETE;
+					}
+				}
+			}
+			if (client.state == READING_BODY)
+			{
+				const int val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived) 
+									? (client.contentLength - client.bodyReceived) : client.rawBuffer.size();
+
+				if (client.bodyReceived + val > static_cast<std::size_t>(client.contentLength))
+				{
+					_errno = -HTTP_PAYLOAD_TOO_LARGE;
+					return (-1);
+				}
+				if (client.contentLength <= MAX_REQUEST_LINE)
+				{
+					client.bodyReceived += val;
+					client.requestBody.append(client.rawBuffer.substr(0, val));
+					client.rawBuffer.erase(0, val);
+					if (client.bodyReceived == static_cast<std::size_t>(client.contentLength))
+						client.state = REQUEST_COMPLETE;
+				}
+				else
+				{
+					if (client.requestBodyFd == -1)
+					{
+						client.requestBodyFd = file.getNewFileFd(client.clientFd);
+						if (client.requestBodyFd == -1)
+						{
+							_errno = -2;
+							return (-1);
+						}
+					}
+					client.bodyReceived += val;
+					const int written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
+					if (written == -1)
+					{
+						_errno = errno;
+						return (-1);
+					}
+					else if (written != val)
+					{
+						client.rawBuffer.erase(0, written);
+						return (1);
+					}
+					client.rawBuffer.erase(0, val);
+					if (client.bodyReceived == static_cast<std::size_t>(client.contentLength))
+						client.state = REQUEST_COMPLETE;
+				}
+			}
+			if (client.state == READING_CHUNKS)
+			{
+				if (client.requestBodyFd == -1)
+				{
+					client.requestBodyFd = file.getNewFileFd(client.clientFd);
+					if (client.requestBodyFd == -1)
+					{
+						_errno = -2;
+						return (-1);
+					}
+				}
+				const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd);
+				if (!result)
+				{
+					close(client.requestBodyFd);
+					client.state = REQUEST_COMPLETE;
+				}
+				else if (result < 0)
+				{
+					if (result <= -HTTP_BAD_REQUEST)
+						_errno = result;
+					else
+						_errno = -result;
+					close(client.requestBodyFd);
+					return (-1);
+				}
+			}
+			if (client.state == REQUEST_COMPLETE)
+			{
+				_errno = 0;
+				return (0);
+			}
 		}
 	}
-
-	_flushBuffer();
+	return (1);
 }
+
+int	Request::getErrno()
+{
+	return (_errno);
+}
+

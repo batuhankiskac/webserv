@@ -14,7 +14,7 @@
 #include <ctime>
 
 #include "Client.hpp"
-#include "RequestReader.hpp"
+#include "Request.hpp"
 #include "File.hpp"
 
 #define BUFFER_SIZE 64
