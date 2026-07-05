@@ -8,16 +8,13 @@
 class WebservConfig {
 private:
 	std::vector<ServerBlock> _servers;
-	std::vector<std::string> _tokens;
-	std::string			   _raw;
 
-	void _extractFromFile(const std::string& filename);
-	void _tokenize();
-	void _parse();
+	void _extractFromFile(const std::string& filename, std::string& raw);
+	void _tokenize(const std::string& raw, std::vector<std::string>& tokens);
+	void _parse(const std::vector<std::string>& tokens);
 
 public:
 	WebservConfig(const std::string& filename);
-	~WebservConfig();
 
 	const std::vector<ServerBlock>& getServers() const;
 };

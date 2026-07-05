@@ -30,9 +30,15 @@ private:
 
 public:
 	ServerBlock();
-	~ServerBlock();
 
 	void parseServerBlock(const std::vector<std::string>& tokens, size_t& i);
+
+	int getPort() const;
+	const std::string& getIp() const;
+	size_t getClientMaxBodySize() const;
+	const std::vector<std::string>& getServerNames() const;
+	const std::map<std::string, std::string>& getErrorPages() const;
+	const std::vector<LocationBlock>& getLocations() const;
 
 };
 

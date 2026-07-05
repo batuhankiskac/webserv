@@ -1,4 +1,5 @@
 #include "ServerBlock.hpp"
+#include <cctype>
 #include <cstddef>
 #include <sstream>
 #include <stdexcept>
@@ -8,8 +9,6 @@
 ServerBlock::ServerBlock() : _port(80), _clientMaxBodySize(1048576), _ip("0.0.0.0") {
 	_setupDirectives();
 }
-
-ServerBlock::~ServerBlock() { }
 
 void ServerBlock::_setupDirectives() {
 	_directives["listen"] = &ServerBlock::_parseListen;
@@ -58,7 +57,7 @@ size_t ServerBlock::_parseSizeWithUnit(const std::string& value, const std::stri
 		throw std::runtime_error("Invalid " + name + " directive");
 	}
 
-	if (multiplier > 0 && size > (size_t)-1 / multiplier) {
+	if (size > (size_t)-1 / multiplier) {
 		throw std::runtime_error("Invalid " + name + " directive");
 	}
 
@@ -97,20 +96,19 @@ void ServerBlock::_parseListen(const std::vector<std::string>& _tokens, size_t& 
 
 	std::string value = _tokens[i++];
 
+	std::string portStr;
 	size_t colon = value.find(':');
 	if (colon == std::string::npos) {
-		std::stringstream ss(value);
-		ss >> _port;
-		if (ss.fail()) {
-			throw std::runtime_error("Invalid listen directive");
-		}
+		portStr = value;
 	} else {
 		_ip = value.substr(0, colon);
-		std::stringstream ss(value.substr(colon + 1));
-		ss >> _port;
-		if (ss.fail()) {
-			throw std::runtime_error("Invalid listen directive");
-		}
+		portStr = value.substr(colon + 1);
+	}
+
+	std::stringstream ss(portStr);
+	ss >> _port;
+	if (ss.fail()) {
+		throw std::runtime_error("Invalid listen directive");
 	}
 
 	if (i >= _tokens.size() || _tokens[i] != ";") {
@@ -184,4 +182,28 @@ void ServerBlock::_parseLocation(const std::vector<std::string>& _tokens, size_t
 	LocationBlock location(path);
 	location.parseLocationBlock(_tokens, i);
 	_locations.push_back(location);
+}
+
+int ServerBlock::getPort() const {
+	return _port;
+}
+
+const std::string& ServerBlock::getIp() const {
+	return _ip;
+}
+
+size_t ServerBlock::getClientMaxBodySize() const {
+	return _clientMaxBodySize;
+}
+
+const std::vector<std::string>& ServerBlock::getServerNames() const {
+	return _serverNames;
+}
+
+const std::map<std::string, std::string>& ServerBlock::getErrorPages() const {
+	return _errorPages;
+}
+
+const std::vector<LocationBlock>& ServerBlock::getLocations() const {
+	return _locations;
 }

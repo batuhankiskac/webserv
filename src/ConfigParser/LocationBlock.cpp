@@ -3,40 +3,30 @@
 #include <stdexcept>
 
 LocationBlock::LocationBlock(const std::string& path) : _path(path), _uploadEnable(false), _autoIndex(false), _returnCode(200) {
-	_setupDirectives();
 }
 
-LocationBlock::~LocationBlock() { }
-
-void LocationBlock::_setupDirectives() {
-	_directives["index"] = &LocationBlock::_parseIndex;
-	_directives["allow_methods"] = &LocationBlock::_parseAllowMethods;
-	_directives["path"] = &LocationBlock::_parsePath;
-	_directives["root"] = &LocationBlock::_parseRoot;
-	_directives["upload_store"] = &LocationBlock::_parseUploadStore;
-	_directives["upload_enable"] = &LocationBlock::_parseUploadEnable;
-	_directives["cgi_path"] = &LocationBlock::_parseCgiPath;
-	_directives["cgi_ext"] = &LocationBlock::_parseCgiExt;
-	_directives["return"] = &LocationBlock::_parseReturn;
-	_directives["autoindex"] = &LocationBlock::_parseAutoIndex;
-}
-
-void LocationBlock::parseLocationBlock(const std::vector<std::string>& _tokens, size_t& i) {
-	if (i >= _tokens.size() || _tokens[i] != "{") {
+void LocationBlock::parseLocationBlock(const std::vector<std::string>& tokens, size_t& i) {
+	if (i >= tokens.size() || tokens[i] != "{") {
 		throw std::runtime_error("Invalid location block");
 	}
 	i++;
 
-	while (i < _tokens.size() && _tokens[i] != "}") {
-		std::map<std::string, func>::iterator it = _directives.find(_tokens[i]);
-		if (it != _directives.end()) {
-			(this->*it->second)(_tokens, i);
-		} else {
-			throw std::runtime_error("Invalid token: " + _tokens[i]);
-		}
+	while (i < tokens.size() && tokens[i] != "}") {
+		const std::string& tok = tokens[i];
+		if      (tok == "root")           _parseSingleValue(tokens, i, _root, "root");
+		else if (tok == "path")           _parseSingleValue(tokens, i, _path, "path");
+		else if (tok == "upload_store")   _parseSingleValue(tokens, i, _uploadStore, "upload_store");
+		else if (tok == "cgi_path")       _parseSingleValue(tokens, i, _cgiPath, "cgi_path");
+		else if (tok == "cgi_ext")        _parseSingleValue(tokens, i, _cgiExt, "cgi_ext");
+		else if (tok == "upload_enable")  _parseOnOff(tokens, i, _uploadEnable, "upload_enable");
+		else if (tok == "autoindex")      _parseOnOff(tokens, i, _autoIndex, "autoindex");
+		else if (tok == "index")          _parseIndex(tokens, i);
+		else if (tok == "allow_methods")  _parseAllowMethods(tokens, i);
+		else if (tok == "return")         _parseReturn(tokens, i);
+		else throw std::runtime_error("Invalid token: " + tok);
 	}
 
-	if (i >= _tokens.size() || _tokens[i] != "}") {
+	if (i >= tokens.size() || tokens[i] != "}") {
 		throw std::runtime_error("Invalid location block");
 	}
 	i++;
@@ -123,4 +113,48 @@ void LocationBlock::_parseReturn(const std::vector<std::string>& _tokens, size_t
 		throw std::runtime_error("Invalid return directive");
 	}
 	i++;
+}
+
+const std::string& LocationBlock::getPath() const {
+	return _path;
+}
+
+const std::string& LocationBlock::getRoot() const {
+	return _root;
+}
+
+const std::vector<std::string>& LocationBlock::getIndex() const {
+	return _index;
+}
+
+const std::vector<std::string>& LocationBlock::getAllowMethods() const {
+	return _allowMethods;
+}
+
+const std::string& LocationBlock::getUploadStore() const {
+	return _uploadStore;
+}
+
+const std::string& LocationBlock::getCgiPath() const {
+	return _cgiPath;
+}
+
+const std::string& LocationBlock::getCgiExt() const {
+	return _cgiExt;
+}
+
+const std::string& LocationBlock::getReturnUrl() const {
+	return _returnUrl;
+}
+
+int LocationBlock::getReturnCode() const {
+	return _returnCode;
+}
+
+bool LocationBlock::getUploadEnable() const {
+	return _uploadEnable;
+}
+
+bool LocationBlock::getAutoIndex() const {
+	return _autoIndex;
 }
