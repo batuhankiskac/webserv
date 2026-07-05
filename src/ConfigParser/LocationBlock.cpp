@@ -42,6 +42,36 @@ void LocationBlock::parseLocationBlock(const std::vector<std::string>& _tokens, 
 	i++;
 }
 
+void LocationBlock::_parseSingleValue(const std::vector<std::string>& tokens, size_t& i,
+                                      std::string& dest, const std::string& name) {
+	i++;
+	if (i >= tokens.size() || tokens[i] == ";") {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+	dest = tokens[i++];
+	if (i >= tokens.size() || tokens[i] != ";") {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+	i++;
+}
+
+void LocationBlock::_parseOnOff(const std::vector<std::string>& tokens, size_t& i,
+                                bool& dest, const std::string& name) {
+	i++;
+	if (i >= tokens.size() || tokens[i] == ";") {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+	std::string value = tokens[i++];
+	if (value != "on" && value != "off") {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+	dest = (value == "on");
+	if (i >= tokens.size() || tokens[i] != ";") {
+		throw std::runtime_error("Invalid " + name + " directive");
+	}
+	i++;
+}
+
 void LocationBlock::_parseIndex(const std::vector<std::string>& _tokens, size_t& i) {
 	i++;
 
@@ -72,88 +102,6 @@ void LocationBlock::_parseAllowMethods(const std::vector<std::string>& _tokens, 
 	i++;
 }
 
-void LocationBlock::_parsePath(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid path directive");
-	}
-	_path = _tokens[i++];
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid path directive");
-	}
-	i++;
-}
-
-void LocationBlock::_parseRoot(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid root directive");
-	}
-	_root = _tokens[i++];
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid root directive");
-	}
-	i++;
-}
-
-void LocationBlock::_parseUploadStore(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid upload_store directive");
-	}
-	_uploadStore = _tokens[i++];
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid upload_store directive");
-	}
-	i++;
-}
-
-void LocationBlock::_parseUploadEnable(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid upload_enable directive");
-	}
-
-	std::string value = _tokens[i++];
-	if (value != "on" && value != "off") {
-		throw std::runtime_error("Invalid upload_enable directive");
-	}
-	_uploadEnable = (value == "on");
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid upload_enable directive");
-	}
-	i++;
-}
-
-void LocationBlock::_parseCgiPath(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid cgi_path directive");
-	}
-	_cgiPath = _tokens[i++];
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid cgi_path directive");
-	}
-	i++;
-}
-
-void LocationBlock::_parseCgiExt(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid cgi_ext directive");
-	}
-	_cgiExt = _tokens[i++];
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid cgi_ext directive");
-	}
-	i++;
-}
 
 void LocationBlock::_parseReturn(const std::vector<std::string>& _tokens, size_t& i) {
 	i++;
@@ -173,24 +121,6 @@ void LocationBlock::_parseReturn(const std::vector<std::string>& _tokens, size_t
 	}
 	if (i >= _tokens.size() || _tokens[i] != ";") {
 		throw std::runtime_error("Invalid return directive");
-	}
-	i++;
-}
-
-void LocationBlock::_parseAutoIndex(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	if (i >= _tokens.size() || _tokens[i] == ";") {
-		throw std::runtime_error("Invalid autoindex directive");
-	}
-
-	std::string value = _tokens[i++];
-	if (value != "on" && value != "off") {
-		throw std::runtime_error("Invalid autoindex directive");
-	}
-	_autoIndex = (value == "on");
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid autoindex directive");
 	}
 	i++;
 }

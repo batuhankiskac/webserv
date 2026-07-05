@@ -20,6 +20,8 @@ private:
 	std::map<std::string, func> _directives;
 	void _setupDirectives();
 
+	static size_t _parseSizeWithUnit(const std::string& value, const std::string& name);
+
 	void _parseListen(const std::vector<std::string>& tokens, size_t& i);
 	void _parseServerName(const std::vector<std::string>& tokens, size_t& i);
 	void _parseErrorPage(const std::vector<std::string>& tokens, size_t& i);
@@ -32,19 +34,6 @@ public:
 
 	void parseServerBlock(const std::vector<std::string>& tokens, size_t& i);
 
-	int getPort() const { return _port; }
-	size_t getClientMaxBodySize() const { return _clientMaxBodySize; }
-	std::string getIp() const { return _ip; }
-	std::map<std::string, std::string> getErrorPages() const { return _errorPages; }
-	std::vector<LocationBlock> getLocations() const { return _locations; }
-	std::vector<std::string> getServerNames() const { return _serverNames; }
-
-	void setPort(int port) { _port = port; }
-	void setClientMaxBodySize(size_t clientMaxBodySize) { _clientMaxBodySize = clientMaxBodySize; }
-	void setIp(const std::string& ip) { _ip = ip; }
-	void setErrorPages(const std::map<std::string, std::string>& errorPages) { _errorPages = errorPages; }
-	void setLocations(const std::vector<LocationBlock>& locations) { _locations = locations; }
-	void setServerNames(const std::vector<std::string>& serverNames) { _serverNames = serverNames; }
 };
 
 #endif

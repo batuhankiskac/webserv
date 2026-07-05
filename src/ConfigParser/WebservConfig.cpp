@@ -26,15 +26,7 @@ void WebservConfig::_extractFromFile(const std::string& filename) {
 			line = line.substr(0, hashPos);
 		}
 
-		bool isEmpty = true;
-		for (std::string::size_type i = 0; i < line.size(); i++) {
-			if (!std::isspace(line[i])) {
-				isEmpty = false;
-				break;
-			}
-		}
-
-		if (!isEmpty) {
+		if (line.find_first_not_of(" \t\r\n") != std::string::npos) {
 			_raw += line + "\n";
 		}
 	}
