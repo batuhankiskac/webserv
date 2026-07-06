@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/types.h>
 #include <vector>
 #include <unistd.h>
 #include <fcntl.h>
@@ -35,6 +36,8 @@ class ListenAndAcceptReqs
 		std::map<int, Client> clients;
 
 		File& file;
+
+		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
 
 		class ListenOrAcceptionError : public std::exception
 		{

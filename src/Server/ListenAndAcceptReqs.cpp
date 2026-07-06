@@ -40,6 +40,14 @@ const char* ListenAndAcceptReqs::ListenOrAcceptionError::what() const throw()
 	return (std::strerror(_errno));
 }
 
+void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour)
+{
+	epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, NULL);
+	close(fd);
+	fdTargetTour.erase(fd);
+	clients.erase(fd);
+}
+
 void	ListenAndAcceptReqs::waitReqs()
 {
 	const int TICK_RATE = 1;
@@ -90,8 +98,19 @@ void	ListenAndAcceptReqs::waitReqs()
 			{
 				int	currentFd = epollEvents.at(i).data.fd;
 
+				if (epollEvents.at(i).events & (EPOLLERR | EPOLLHUP))
+				{
+					if (currentFd == socketFd)
+						continue ;
+					cleanupClient(currentFd, fdTargetTour);
+					continue ;
+				}
+
 				if (currentFd == socketFd)
 				{
+					if (!(epollEvents.at(i).events & EPOLLIN))
+						continue ;
+
 					int	clientSocket = accept(socketFd, NULL, NULL);
 					if (clientSocket == -1)
 					{
@@ -127,8 +146,10 @@ void	ListenAndAcceptReqs::waitReqs()
 
 					fdTargetTour[clientSocket] = (tour + TIME_OUT) % MAX_TOUR;
 					timerWheel[(tour + TIME_OUT) % MAX_TOUR].push_back(clientSocket);
+					continue ;
 				}
-				else
+
+				if (epollEvents.at(i).events & EPOLLIN)
 				{
 					int	update = 0;
 					bool disconnect = false;
@@ -137,7 +158,16 @@ void	ListenAndAcceptReqs::waitReqs()
 					if (!result && !Request::getErrno())
 					{
 						update = 1;
-						// istek başarılı. Yanıt oluştur.
+						clients[currentFd].response =
+							"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!";
+
+						struct epoll_event modEvent;
+						modEvent.data.fd = currentFd;
+						modEvent.events = EPOLLOUT;
+						if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd, &modEvent) == -1)
+						{
+							disconnect = true;
+						}
 					}
 					else if (!result && Request::getErrno() == -1)
 					{
@@ -191,16 +221,57 @@ void	ListenAndAcceptReqs::waitReqs()
 
 					if (disconnect)
 					{
-						epoll_ctl(epollFd, EPOLL_CTL_DEL, currentFd, NULL);
-						close(currentFd);
-						fdTargetTour.erase(currentFd);
-						clients.erase(currentFd);
+						cleanupClient(currentFd, fdTargetTour);
 						continue ;
 					}
 					
 					int	newTourNum = (tour + TIME_OUT) % MAX_TOUR;
 					if (update && 
 						fdTargetTour[currentFd] != newTourNum)
+					{
+						timerWheel[newTourNum].push_back(currentFd);
+						fdTargetTour[currentFd] = newTourNum;
+					}
+				}
+				else if (epollEvents.at(i).events & EPOLLOUT)
+				{
+					std::string& resp = clients[currentFd].response;
+					if (resp.empty())
+					{
+						cleanupClient(currentFd, fdTargetTour);
+						continue ;
+					}
+
+					ssize_t sent = send(currentFd, resp.c_str(), resp.size(), 0);
+					if (sent == -1)
+					{
+						if (errno == EAGAIN || errno == EWOULDBLOCK)
+						{
+							// Yazma tamponu dolu, bir sonraki EPOLLOUT beklenir.
+						}
+						else
+						{
+							cleanupClient(currentFd, fdTargetTour);
+							continue ;
+						}
+					}
+					else if (sent == 0)
+					{
+						cleanupClient(currentFd, fdTargetTour);
+						continue ;
+					}
+					else if (sent == static_cast<ssize_t>(resp.size()))
+					{
+						cleanupClient(currentFd, fdTargetTour);
+						continue ;
+					}
+					else
+					{
+						resp.erase(0, sent);
+					}
+
+					int	newTourNum = (tour + TIME_OUT) % MAX_TOUR;
+					if (fdTargetTour[currentFd] != newTourNum)
 					{
 						timerWheel[newTourNum].push_back(currentFd);
 						fdTargetTour[currentFd] = newTourNum;
