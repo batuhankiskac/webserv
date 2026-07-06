@@ -4,9 +4,16 @@ CXX = c++
 
 CXXFLAGS = -Wall -Wextra -Werror -std=c++98 -I ./include
 
-SRCS = src/ConfigParser/WebservConfig.cpp \
-	   src/ConfigParser/LocationBlock.cpp \
-	   src/ConfigParser/ServerBlock.cpp
+SRCS = src/ConfigParser/LocationBlock.cpp \
+	   src/ConfigParser/ServerBlock.cpp \
+	   src/ConfigParser/WebservConfig.cpp \
+	   src/File/File.cpp \
+	   src/RequestParser/Request.cpp \
+	   src/RequestParser/RequestParser.cpp \
+	   src/Response/Response.cpp \
+	   src/Server/Client.cpp \
+	   src/Server/ListenAndAcceptReqs.cpp \
+	   src/Server/Server.cpp
 
 OBJS = $(SRCS:.cpp=.o)
 
