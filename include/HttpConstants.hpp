@@ -32,4 +32,13 @@
 #define HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE	431 // İstek başlıkları (Header alanları) çok büyük
 #define HTTP_UNAVAILABLE_FOR_LEGAL_REASONS	451 // Yasal nedenlerden dolayı içerik engellendi
 
+// --- HTTP 5xx SERVER ERROR ---
+
+#define HTTP_INTERNAL_SERVER_ERROR			500 // Sunucu beklenmeyen bir durumla karşılaştı
+#define HTTP_NOT_IMPLEMENTED				501 // Sunucu isteği yerine getirecek işlevi desteklemiyor
+#define HTTP_BAD_GATEWAY					502 // Ağ Geçidi (Gateway) olarak çalışan sunucu üst sunucudan geçersiz yanıt aldı
+#define HTTP_SERVICE_UNAVAILABLE			503 // Sunucu geçici olarak hizmet veremiyor (Bakım veya aşırı yük)
+#define HTTP_GATEWAY_TIMEOUT				504 // Ağ Geçidi (Gateway), üst sunucudan zamanında yanıt alamadı
+#define HTTP_VERSION_NOT_SUPPORTED			505 // Sunucu istekte kullanılan HTTP sürümünü desteklemiyor
+
 #endif // HTTP_CONSTANTS_HPP
