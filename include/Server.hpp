@@ -18,9 +18,11 @@ class Server
 		~Server();
 
 		int getSocketFd( void ) const;
+		int getPort( void ) const;
 
 	private:
 		int	socketFd;
+		int	port;
 
 		class SocketCreationError : public std::exception
 		{

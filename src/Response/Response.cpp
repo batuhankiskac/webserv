@@ -21,6 +21,22 @@ static const ErrorInfo g_errorTable[] = {
 
 static const std::size_t g_errorTableSize = sizeof(g_errorTable) / sizeof(g_errorTable[0]);
 
+struct ReasonPhrase {
+	int code;
+	const char* reason;
+};
+
+static const ReasonPhrase g_reasonTable[] = {
+	{ 200, "OK" },
+	{ 301, "Moved Permanently" },
+	{ 302, "Found" },
+	{ 303, "See Other" },
+	{ 307, "Temporary Redirect" },
+	{ 308, "Permanent Redirect" }
+};
+
+static const std::size_t g_reasonTableSize = sizeof(g_reasonTable) / sizeof(g_reasonTable[0]);
+
 Response::Response() : _status(200) { }
 
 void Response::setStatus(int code) { _status = code; }
@@ -38,6 +54,14 @@ const ErrorInfo* Response::_lookupError(int code) {
 	unknown.code = code;
 
 	return &unknown;
+}
+
+const char* Response::_reasonPhrase(int code) {
+	for (std::size_t i = 0; i < g_reasonTableSize; ++i) {
+		if (g_reasonTable[i].code == code)
+			return g_reasonTable[i].reason;
+	}
+	return NULL;
 }
 
 std::string	Response::_defaultErrorHtml(int code) {
@@ -104,13 +128,15 @@ Response Response::error(int code, const ServerBlock& server) {
 }
 
 std::string	Response::serialize() const {
-	const ErrorInfo* e = _lookupError(_status);
+	const char* reason = _reasonPhrase(_status);
+	if (!reason)
+		reason = _lookupError(_status)->reason;
 	std::string out;
 
 	out += "HTTP/1.1 ";
 	out += _intToString(_status);
 	out += " ";
-	out += e->reason;
+	out += reason;
 	out += "\r\n";
 
 	for (std::map<std::string, std::string>::const_iterator it = _headers.begin(); it != _headers.end(); ++it) {
