@@ -1,16 +1,15 @@
 #include "Server.hpp"
 
-Server::Server(std::string ip, int port)
+Server::Server(std::string ip, int port) : port(port)
 {
-	this->port = port;
 	socketFd = socket(AF_INET, SOCK_STREAM, 0);
 	if (socketFd < 0)
 	{
 		throw Server::SocketCreationError();
 	}
 
-	const int	open = 1;
-	if (setsockopt(socketFd, SOL_SOCKET, SO_REUSEADDR, &open, sizeof(open)) < 0)
+	const int	reuse = 1;
+	if (setsockopt(socketFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
 	{
 		close(socketFd);
 		throw Server::SocketCreationError();

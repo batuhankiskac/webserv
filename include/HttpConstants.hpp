@@ -1,6 +1,19 @@
 #ifndef HTTP_CONSTANTS_HPP
 #define HTTP_CONSTANTS_HPP
 
+// --- HTTP 2xx SUCCESS ---
+
+#define HTTP_OK							200 // İstek başarılı
+#define HTTP_CREATED					201 // İstek tamamlandı ve yeni bir kaynak oluşturuldu
+
+// --- HTTP 3xx REDIRECTION ---
+
+#define HTTP_MOVED_PERMANENTLY			301 // Kaynak kalıcı olarak taşındı
+#define HTTP_FOUND						302 // Kaynak geçici olarak başka bir URI'de
+#define HTTP_SEE_OTHER					303 // Yanıt başka bir URI'den alınmalı
+#define HTTP_TEMPORARY_REDIRECT			307 // Kaynak geçici olarak taşındı (metodu korur)
+#define HTTP_PERMANENT_REDIRECT			308 // Kaynak kalıcı olarak taşındı (metodu korur)
+
 // --- HTTP 4xx CLIENT ERROR ---
 
 #define HTTP_BAD_REQUEST					400 // İstek hatalı veya bozuk (Sözdizimi hatası)

@@ -22,7 +22,7 @@ class Server
 
 	private:
 		int	socketFd;
-		int	port;
+		const int	port;
 
 		class SocketCreationError : public std::exception
 		{

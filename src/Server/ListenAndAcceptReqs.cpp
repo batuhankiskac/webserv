@@ -1,7 +1,10 @@
 #include "ListenAndAcceptReqs.hpp"
+#include "RequestHandler.hpp"
+#include "Response.hpp"
 
-ListenAndAcceptReqs::ListenAndAcceptReqs(const int socketFd, File& file)
-	: file(file)
+ListenAndAcceptReqs::ListenAndAcceptReqs(const int socketFd, File& file,
+		const WebservConfig& config, int port)
+	: file(file), config(config), port(port)
 {
 	this->socketFd = socketFd;
 	if (listen(socketFd, SOMAXCONN) < 0)
@@ -46,6 +49,30 @@ void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour
 	close(fd);
 	fdTargetTour.erase(fd);
 	clients.erase(fd);
+}
+
+bool	ListenAndAcceptReqs::_sendErrorAndMod(int fd, Client& client, int code)
+{
+	const std::vector<ServerBlock>&	servers = config.getServers();
+	const ServerBlock*	defServer = &servers[0];
+	for (std::size_t i = 0; i < servers.size(); ++i)
+	{
+		if (servers[i].getPort() == port)
+		{
+			defServer = &servers[i];
+			break;
+		}
+	}
+
+	Response	resp = Response::error(code, *defServer);
+	client.response = resp.serialize();
+
+	struct epoll_event	modEvent;
+	modEvent.data.fd = fd;
+	modEvent.events = EPOLLOUT;
+	if (epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &modEvent) == -1)
+		return (false);
+	return (true);
 }
 
 void	ListenAndAcceptReqs::waitReqs()
@@ -154,14 +181,13 @@ void	ListenAndAcceptReqs::waitReqs()
 					int	update = 0;
 					bool disconnect = false;
 
-					const int result = Request::readFd(clients[currentFd], file);
-					if (!result && !Request::getErrno())
-					{
-						update = 1;
-						clients[currentFd].response =
-							"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!";
+				const int result = Request::readFd(clients[currentFd], file);
+				if (!result && !Request::getErrno())
+				{
+					update = 1;
+					RequestHandler::handle(clients[currentFd], config, port);
 
-						struct epoll_event modEvent;
+					struct epoll_event modEvent;
 						modEvent.data.fd = currentFd;
 						modEvent.events = EPOLLOUT;
 						if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd, &modEvent) == -1)
@@ -192,30 +218,31 @@ void	ListenAndAcceptReqs::waitReqs()
 							}
 							else
 							{
-								// 2. Disk (I/O) Hataları: Disk doldu (ENOSPC), I/O hatası (EIO) vb.
-								// 500
-								// TODO: Soketi EPOLLOUT (Yazma) moduna geçir
+								if (!_sendErrorAndMod(currentFd, clients[currentFd], HTTP_INTERNAL_SERVER_ERROR))
+									disconnect = true;
+								else
+									update = 1;
 							}
 						}
 						else if (_errno == -2)
 						{
 							const int err = this->file.getErr();
+							int code;
 							if (err == EMFILE || err == ENFILE)
-							{
-								// Sunucu kapasite limitlerine çarptıysa (Too many open files)
-								// 503
-							}
+								code = HTTP_SERVICE_UNAVAILABLE;
 							else
-							{
-								// 500
-							}
-							// TODO: Soketi EPOLLOUT (Yazma) moduna geçir
+								code = HTTP_INTERNAL_SERVER_ERROR;
+							if (!_sendErrorAndMod(currentFd, clients[currentFd], code))
+								disconnect = true;
+							else
+								update = 1;
 						}
 						else
 						{
-							disconnect = true;
-							// http hataları - halleri ile.
-							// HATAYA göre yanıt ile socket'i kapat.
+							if (!_sendErrorAndMod(currentFd, clients[currentFd], -_errno))
+								disconnect = true;
+							else
+								update = 1;
 						}
 					}
 

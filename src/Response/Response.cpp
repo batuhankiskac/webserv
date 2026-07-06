@@ -4,6 +4,13 @@
 #include <fstream>
 
 static const ErrorInfo g_errorTable[] = {
+	{ HTTP_OK,							"OK",							"" },
+	{ HTTP_CREATED,						"Created",						"" },
+	{ HTTP_MOVED_PERMANENTLY,			"Moved Permanently",			"" },
+	{ HTTP_FOUND,						"Found",						"" },
+	{ HTTP_SEE_OTHER,					"See Other",					"" },
+	{ HTTP_TEMPORARY_REDIRECT,			"Temporary Redirect",			"" },
+	{ HTTP_PERMANENT_REDIRECT,			"Permanent Redirect",			"" },
 	{ HTTP_BAD_REQUEST,					"Bad Request",					"Malformed request syntax." },
 	{ HTTP_UNAUTHORIZED,				"Unauthorized",					"Authentication is required." },
 	{ HTTP_FORBIDDEN,					"Forbidden",					"Access is denied." },
@@ -20,22 +27,6 @@ static const ErrorInfo g_errorTable[] = {
 };
 
 static const std::size_t g_errorTableSize = sizeof(g_errorTable) / sizeof(g_errorTable[0]);
-
-struct ReasonPhrase {
-	int code;
-	const char* reason;
-};
-
-static const ReasonPhrase g_reasonTable[] = {
-	{ 200, "OK" },
-	{ 301, "Moved Permanently" },
-	{ 302, "Found" },
-	{ 303, "See Other" },
-	{ 307, "Temporary Redirect" },
-	{ 308, "Permanent Redirect" }
-};
-
-static const std::size_t g_reasonTableSize = sizeof(g_reasonTable) / sizeof(g_reasonTable[0]);
 
 Response::Response() : _status(200) { }
 
@@ -54,14 +45,6 @@ const ErrorInfo* Response::_lookupError(int code) {
 	unknown.code = code;
 
 	return &unknown;
-}
-
-const char* Response::_reasonPhrase(int code) {
-	for (std::size_t i = 0; i < g_reasonTableSize; ++i) {
-		if (g_reasonTable[i].code == code)
-			return g_reasonTable[i].reason;
-	}
-	return NULL;
 }
 
 std::string	Response::_defaultErrorHtml(int code) {
@@ -128,15 +111,13 @@ Response Response::error(int code, const ServerBlock& server) {
 }
 
 std::string	Response::serialize() const {
-	const char* reason = _reasonPhrase(_status);
-	if (!reason)
-		reason = _lookupError(_status)->reason;
+	const ErrorInfo* e = _lookupError(_status);
 	std::string out;
 
 	out += "HTTP/1.1 ";
 	out += _intToString(_status);
 	out += " ";
-	out += reason;
+	out += e->reason;
 	out += "\r\n";
 
 	for (std::map<std::string, std::string>::const_iterator it = _headers.begin(); it != _headers.end(); ++it) {

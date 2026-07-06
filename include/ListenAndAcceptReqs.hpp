@@ -17,6 +17,7 @@
 #include "Client.hpp"
 #include "Request.hpp"
 #include "File.hpp"
+#include "WebservConfig.hpp"
 
 #define BUFFER_SIZE 64
 #define TIME_OUT	30
@@ -25,7 +26,7 @@
 class ListenAndAcceptReqs
 {
 	public:
-		ListenAndAcceptReqs(const int socketFd, File& file);
+		ListenAndAcceptReqs(const int socketFd, File& file, const WebservConfig& config, int port);
 		~ListenAndAcceptReqs();
 		void	waitReqs();
 
@@ -36,8 +37,11 @@ class ListenAndAcceptReqs
 		std::map<int, Client> clients;
 
 		File& file;
+		const WebservConfig& config;
+		int	port;
 
 		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
+		bool	_sendErrorAndMod(int fd, Client& client, int code);
 
 		class ListenOrAcceptionError : public std::exception
 		{

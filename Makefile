@@ -10,6 +10,7 @@ SRCS = src/ConfigParser/LocationBlock.cpp \
 	   src/File/File.cpp \
 	   src/RequestParser/Request.cpp \
 	   src/RequestParser/RequestParser.cpp \
+	   src/Response/RequestHandler.cpp \
 	   src/Response/Response.cpp \
 	   src/Server/Client.cpp \
 	   src/Server/ListenAndAcceptReqs.cpp \

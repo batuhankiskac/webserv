@@ -18,7 +18,6 @@ private:
 	std::string _body;
 
 	static const ErrorInfo* _lookupError(int code);
-	static const char* _reasonPhrase(int code);
 	static std::string _defaultErrorHtml(int code);
 	static std::string _intToString(long n);
 	static bool _readFileToString(const std::string& path, std::string& out);
