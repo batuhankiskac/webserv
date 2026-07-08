@@ -5,6 +5,7 @@
 
 #define HTTP_OK							200 // İstek başarılı
 #define HTTP_CREATED					201 // İstek tamamlandı ve yeni bir kaynak oluşturuldu
+#define HTTP_NO_CONTENT					204 // İstek başarılı ama yanıt gövdesi yok
 
 // --- HTTP 3xx REDIRECTION ---
 

@@ -11,7 +11,10 @@ private:
 	static const ServerBlock& _selectServerBlock(const WebservConfig& config, int port, const std::string& host);
 	static const LocationBlock* _selectLocationBlock(const ServerBlock& server, const std::string& path);
 	static void _serveError(Client& client, int code, const ServerBlock& server);
-	static void _serveFile(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);
+	static void _handleGet(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);
+	static void _handlePost(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);
+	static void _handleDelete(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);
+	static std::string _generateAutoindex(const std::string& filePath, const std::string& reqPath);
 
 public:
 	static void handle(Client& client, const WebservConfig& config, int port);

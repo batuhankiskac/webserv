@@ -6,6 +6,7 @@
 static const ErrorInfo g_errorTable[] = {
 	{ HTTP_OK,							"OK",							"" },
 	{ HTTP_CREATED,						"Created",						"" },
+	{ HTTP_NO_CONTENT,					"No Content",					"" },
 	{ HTTP_MOVED_PERMANENTLY,			"Moved Permanently",			"" },
 	{ HTTP_FOUND,						"Found",						"" },
 	{ HTTP_SEE_OTHER,					"See Other",					"" },
