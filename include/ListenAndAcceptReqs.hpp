@@ -17,6 +17,7 @@
 #include "Client.hpp"
 #include "Request.hpp"
 #include "File.hpp"
+#include "Server.hpp"
 #include "WebservConfig.hpp"
 
 #define BUFFER_SIZE 64
@@ -26,19 +27,18 @@
 class ListenAndAcceptReqs
 {
 	public:
-		ListenAndAcceptReqs(const int socketFd, File& file, const WebservConfig& config, int port);
+		ListenAndAcceptReqs(const std::vector<Server*>& servers, File& file, const WebservConfig& config);
 		~ListenAndAcceptReqs();
 		void	waitReqs();
 
 	private:
 		int	epollFd;
-		int	socketFd;
+		std::map<int, int> listenFdToPort;
 		std::vector<struct epoll_event> epollEvents;
 		std::map<int, Client> clients;
 
 		File& file;
 		const WebservConfig& config;
-		int	port;
 
 		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
 		bool	_sendErrorAndMod(int fd, Client& client, int code);

@@ -2,30 +2,39 @@
 #include "RequestHandler.hpp"
 #include "Response.hpp"
 
-ListenAndAcceptReqs::ListenAndAcceptReqs(const int socketFd, File& file,
-		const WebservConfig& config, int port)
-	: file(file), config(config), port(port)
+ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
+		File& file, const WebservConfig& config)
+	: epollFd(-1), file(file), config(config)
 {
-	this->socketFd = socketFd;
-	if (listen(socketFd, SOMAXCONN) < 0)
-	{
-		throw ListenAndAcceptReqs::ListenOrAcceptionError();
-	}
+	if (servers.empty())
+		throw (ListenAndAcceptReqs::ListenOrAcceptionError());
 
 	epollFd = epoll_create(1);
 	if (epollFd == -1)
-	{
 		throw (ListenAndAcceptReqs::ListenOrAcceptionError());
-	}
 
-	struct epoll_event event;
-	event.events = EPOLLIN;
-	event.data.fd = socketFd;
-
-	if (epoll_ctl(epollFd, EPOLL_CTL_ADD, socketFd, &event) == -1)
+	for (std::size_t i = 0; i < servers.size(); ++i)
 	{
-		close(epollFd);
-		throw (ListenAndAcceptReqs::ListenOrAcceptionError());
+		int	listenFd = servers[i]->getSocketFd();
+		int	port = servers[i]->getPort();
+
+		if (listen(listenFd, SOMAXCONN) < 0)
+		{
+			close(epollFd);
+			throw (ListenAndAcceptReqs::ListenOrAcceptionError());
+		}
+
+		struct epoll_event event;
+		event.events = EPOLLIN;
+		event.data.fd = listenFd;
+
+		if (epoll_ctl(epollFd, EPOLL_CTL_ADD, listenFd, &event) == -1)
+		{
+			close(epollFd);
+			throw (ListenAndAcceptReqs::ListenOrAcceptionError());
+		}
+
+		listenFdToPort[listenFd] = port;
 	}
 }
 
@@ -57,7 +66,7 @@ bool	ListenAndAcceptReqs::_sendErrorAndMod(int fd, Client& client, int code)
 	const ServerBlock*	defServer = &servers[0];
 	for (std::size_t i = 0; i < servers.size(); ++i)
 	{
-		if (servers[i].getPort() == port)
+		if (servers[i].getPort() == client.port)
 		{
 			defServer = &servers[i];
 			break;
@@ -127,18 +136,18 @@ void	ListenAndAcceptReqs::waitReqs()
 
 				if (epollEvents.at(i).events & (EPOLLERR | EPOLLHUP))
 				{
-					if (currentFd == socketFd)
+					if (listenFdToPort.count(currentFd))
 						continue ;
 					cleanupClient(currentFd, fdTargetTour);
 					continue ;
 				}
 
-				if (currentFd == socketFd)
+				if (listenFdToPort.count(currentFd))
 				{
 					if (!(epollEvents.at(i).events & EPOLLIN))
 						continue ;
 
-					int	clientSocket = accept(socketFd, NULL, NULL);
+					int	clientSocket = accept(currentFd, NULL, NULL);
 					if (clientSocket == -1)
 					{
 						std::cerr << "One connecttion cannot accept."
@@ -169,6 +178,7 @@ void	ListenAndAcceptReqs::waitReqs()
 					
 					struct Client client;
 					client.clientFd = clientSocket;
+					client.port = listenFdToPort[currentFd];
 					clients[clientSocket] = client;
 
 					fdTargetTour[clientSocket] = (tour + TIME_OUT) % MAX_TOUR;
@@ -185,7 +195,7 @@ void	ListenAndAcceptReqs::waitReqs()
 				if (!result && !Request::getErrno())
 				{
 					update = 1;
-					RequestHandler::handle(clients[currentFd], config, port);
+					RequestHandler::handle(clients[currentFd], config, clients[currentFd].port);
 
 					struct epoll_event modEvent;
 						modEvent.data.fd = currentFd;

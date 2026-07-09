@@ -13,8 +13,8 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 
 		std::string	size_line = rawBuffer.substr(0, crlf_pos);
 
-		std::size_t semi_pos = size_line.find(';');
-		std::string size_str;
+		std::size_t	semi_pos = size_line.find(';');
+		std::string	size_str;
 
 		if (semi_pos != std::string::npos) 
 		{
@@ -28,8 +28,8 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 			size_str = size_line;
 		}
 		
-		char* end_ptr;
-		long chunk_size = std::strtol(size_str.c_str(), &end_ptr, 16);
+		char*	end_ptr;
+		long	chunk_size = std::strtol(size_str.c_str(), &end_ptr, 16);
 
 		if ((*end_ptr != '\0' && *end_ptr != ' ' && *end_ptr != '\t') || 
 				(chunk_size < 0))
@@ -51,7 +51,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 			return (1);
 		}
 
-		std::size_t total_chunk_bytes = crlf_pos + 2 + chunk_size + 2;
+		std::size_t	total_chunk_bytes = crlf_pos + 2 + chunk_size + 2;
 		
 		if (rawBuffer.length() < total_chunk_bytes)
 			return (1);
@@ -65,7 +65,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 		{
 			return (-HTTP_PAYLOAD_TOO_LARGE);
 		}
-		ssize_t written = write(fileFd, rawBuffer.c_str() + crlf_pos + 2, chunk_size);
+		ssize_t	written = write(fileFd, rawBuffer.c_str() + crlf_pos + 2, chunk_size);
 		if (written == -1 || written != chunk_size)
 		{
 			return (-errno);
@@ -92,7 +92,7 @@ int Request::readFd(struct Client &client, File& file)
 
 	while (1)
 	{
-		char buffer[MAX_REQUEST_LINE];
+		char	buffer[MAX_REQUEST_LINE];
 		int	result = recv(client.clientFd, buffer, sizeof(buffer), 0);
 		if (result == -1)
 		{
@@ -119,9 +119,9 @@ int Request::readFd(struct Client &client, File& file)
 					return (-1);
 				}
 
-				std::string &req = client.rawBuffer;
+				std::string&	req = client.rawBuffer;
 
-				std::size_t pos = req.find("\r\n\r\n");
+				std::size_t	pos = req.find("\r\n\r\n");
 				if (pos != std::string::npos)
 				{
 					client.requestHeader = req.substr(0, pos);
@@ -159,7 +159,7 @@ int Request::readFd(struct Client &client, File& file)
 			}
 			if (client.state == READING_BODY)
 			{
-				const int val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived) 
+				const int	val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived) 
 									? (client.contentLength - client.bodyReceived) : client.rawBuffer.size();
 
 				if (client.bodyReceived + val > static_cast<std::size_t>(client.contentLength))
@@ -187,7 +187,7 @@ int Request::readFd(struct Client &client, File& file)
 						}
 					}
 					client.bodyReceived += val;
-					const int written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
+					const int	written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
 					if (written == -1)
 					{
 						_errno = errno;

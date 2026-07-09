@@ -296,7 +296,7 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 }
 
 void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath) {
-	std::string root = loc.getRoot();
+	std::string	root = loc.getRoot();
 	if (root.empty()) {
 		_serveError(client, HTTP_NOT_FOUND, server);
 		return;
@@ -307,9 +307,9 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 		return;
 	}
 
-	std::string filePath = root + reqPath;
+	std::string	filePath = root + reqPath;
 
-	struct stat st;
+	struct stat	st;
 	if (stat(filePath.c_str(), &st) != 0) {
 		_serveError(client, HTTP_NOT_FOUND, server);
 		return;
@@ -329,7 +329,7 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 		return;
 	}
 
-	Response resp;
+	Response	resp;
 	resp.setStatus(HTTP_NO_CONTENT);
 	resp.addHeader("Content-Length", "0");
 	resp.addHeader("Connection", "close");
@@ -347,9 +347,9 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		return;
 	}
 
-	const std::string& method = client.request.getMethod();
-	const std::vector<std::string>& allowed = loc->getAllowMethods();
-	bool methodOk = false;
+	const std::string&	method = client.request.getMethod();
+	const std::vector<std::string>&	allowed = loc->getAllowMethods();
+	bool	methodOk = false;
 	for (size_t i = 0; i < allowed.size(); ++i) {
 		if (allowed[i] == method) {
 			methodOk = true;
@@ -361,14 +361,14 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		return;
 	}
 
-	long long contentLen = client.contentLength;
+	long long	contentLen = client.contentLength;
 	if (contentLen > 0 && static_cast<size_t>(contentLen) > server.getClientMaxBodySize()) {
 		_serveError(client, HTTP_PAYLOAD_TOO_LARGE, server);
 		return;
 	}
 
 	if (loc->getReturnCode() != 200) {
-		Response resp;
+		Response	resp;
 		resp.setStatus(loc->getReturnCode());
 		resp.addHeader("Location", loc->getReturnUrl());
 		resp.addHeader("Content-Length", "0");

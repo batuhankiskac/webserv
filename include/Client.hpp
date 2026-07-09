@@ -18,6 +18,7 @@ struct Client
 {
 	int			clientFd;
 	int			requestBodyFd;
+	int			port;
 
 	long long	contentLength;
 	RequestState	state;

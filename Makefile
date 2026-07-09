@@ -4,7 +4,8 @@ CXX = c++
 
 CXXFLAGS = -Wall -Wextra -Werror -std=c++98 -I ./include
 
-SRCS = src/ConfigParser/LocationBlock.cpp \
+SRCS = src/main.cpp \
+	   src/ConfigParser/LocationBlock.cpp \
 	   src/ConfigParser/ServerBlock.cpp \
 	   src/ConfigParser/WebservConfig.cpp \
 	   src/File/File.cpp \

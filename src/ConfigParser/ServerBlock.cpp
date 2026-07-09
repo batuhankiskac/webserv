@@ -23,9 +23,9 @@ size_t ServerBlock::_parseSizeWithUnit(const std::string& value, const std::stri
 		throw std::runtime_error("Invalid " + name + " directive");
 	}
 
-	size_t multiplier = 1;
-	std::string numStr = value;
-	char unit = value[value.size() - 1];
+	size_t	multiplier = 1;
+	std::string	numStr = value;
+	char	unit = value[value.size() - 1];
 
 	switch (unit) {
 		case 'k':
@@ -50,8 +50,8 @@ size_t ServerBlock::_parseSizeWithUnit(const std::string& value, const std::stri
 			break;
 	}
 
-	std::stringstream ss(numStr);
-	size_t size;
+	std::stringstream	ss(numStr);
+	size_t	size;
 	ss >> size;
 	if (ss.fail()) {
 		throw std::runtime_error("Invalid " + name + " directive");
@@ -73,7 +73,7 @@ void ServerBlock::parseServerBlock(const std::vector<std::string>& _tokens, size
 	i++;
 
 	while (i < _tokens.size() && _tokens[i] != "}") {
-		std::map<std::string, func>::iterator it = _directives.find(_tokens[i]);
+		std::map<std::string, func>::iterator	it = _directives.find(_tokens[i]);
 		if (it != _directives.end()) {
 			(this->*it->second)(_tokens, i);
 		} else {
@@ -94,10 +94,10 @@ void ServerBlock::_parseListen(const std::vector<std::string>& _tokens, size_t& 
 		throw std::runtime_error("Invalid listen directive");
 	}
 
-	std::string value = _tokens[i++];
+	std::string	value = _tokens[i++];
 
-	std::string portStr;
-	size_t colon = value.find(':');
+	std::string	portStr;
+	size_t	colon = value.find(':');
 	if (colon == std::string::npos) {
 		portStr = value;
 	} else {
@@ -105,7 +105,7 @@ void ServerBlock::_parseListen(const std::vector<std::string>& _tokens, size_t& 
 		portStr = value.substr(colon + 1);
 	}
 
-	std::stringstream ss(portStr);
+	std::stringstream	ss(portStr);
 	ss >> _port;
 	if (ss.fail()) {
 		throw std::runtime_error("Invalid listen directive");
@@ -133,7 +133,7 @@ void ServerBlock::_parseServerName(const std::vector<std::string>& _tokens, size
 void ServerBlock::_parseErrorPage(const std::vector<std::string>& _tokens, size_t& i) {
 	i++;
 
-	std::vector<std::string> values;
+	std::vector<std::string>	values;
 	while (i < _tokens.size() && _tokens[i] != ";") {
 		values.push_back(_tokens[i++]);
 	}
@@ -147,7 +147,7 @@ void ServerBlock::_parseErrorPage(const std::vector<std::string>& _tokens, size_
 		throw std::runtime_error("Invalid error_page directive");
 	}
 
-	std::string path = values.back();
+	std::string	path = values.back();
 	values.pop_back();
 	for (size_t j = 0; j < values.size(); j++) {
 		_errorPages[values[j]] = path;
@@ -161,7 +161,7 @@ void ServerBlock::_parseClientMaxBodySize(const std::vector<std::string>& _token
 		throw std::runtime_error("Invalid client_max_body_size directive");
 	}
 
-	std::string value = _tokens[i++];
+	std::string	value = _tokens[i++];
 	_clientMaxBodySize = _parseSizeWithUnit(value, "client_max_body_size");
 
 	if (i >= _tokens.size() || _tokens[i] != ";") {
@@ -177,9 +177,9 @@ void ServerBlock::_parseLocation(const std::vector<std::string>& _tokens, size_t
 		throw std::runtime_error("Invalid location directive");
 	}
 
-	std::string path = _tokens[i++];
+	std::string	path = _tokens[i++];
 
-	LocationBlock location(path);
+	LocationBlock	location(path);
 	location.parseLocationBlock(_tokens, i);
 	_locations.push_back(location);
 }

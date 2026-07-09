@@ -3,7 +3,7 @@
 #include <sstream>
 #include <fstream>
 
-static const ErrorInfo g_errorTable[] = {
+static const ErrorInfo	g_errorTable[] = {
 	{ HTTP_OK,							"OK",							"" },
 	{ HTTP_CREATED,						"Created",						"" },
 	{ HTTP_NO_CONTENT,					"No Content",					"" },
@@ -27,7 +27,7 @@ static const ErrorInfo g_errorTable[] = {
 	{ HTTP_VERSION_NOT_SUPPORTED,		"HTTP Version Not Supported",	"The HTTP version is not supported." }
 };
 
-static const std::size_t g_errorTableSize = sizeof(g_errorTable) / sizeof(g_errorTable[0]);
+static const std::size_t	g_errorTableSize = sizeof(g_errorTable) / sizeof(g_errorTable[0]);
 
 Response::Response() : _status(200) { }
 
@@ -42,15 +42,15 @@ const ErrorInfo* Response::_lookupError(int code) {
 			return &g_errorTable[i];
 	}
 
-	static ErrorInfo unknown = { 0, "Error", "Unknown error." };
+	static ErrorInfo	unknown = { 0, "Error", "Unknown error." };
 	unknown.code = code;
 
 	return &unknown;
 }
 
 std::string	Response::_defaultErrorHtml(int code) {
-	const ErrorInfo* e = _lookupError(code);
-	std::stringstream ss;
+	const ErrorInfo*	e = _lookupError(code);
+	std::stringstream	ss;
 
 	ss << "<!DOCTYPE html>" << "\r\n";
 	ss << "<html>" << "\r\n";
@@ -67,11 +67,11 @@ std::string	Response::_defaultErrorHtml(int code) {
 }
 
 bool Response::_readFileToString(const std::string& path, std::string& out) {
-	std::ifstream f(path.c_str(), std::ios::binary);
+	std::ifstream	f(path.c_str(), std::ios::binary);
 	if (!f.is_open())
 		return false;
 
-	std::stringstream ss;
+	std::stringstream	ss;
 	ss << f.rdbuf();
 	out = ss.str();
 
@@ -82,21 +82,21 @@ bool Response::_readFileToString(const std::string& path, std::string& out) {
 }
 
 std::string	Response::_intToString(long n) {
-	std::stringstream ss;
+	std::stringstream	ss;
 	ss << n;
 	return ss.str();
 }
 
 Response Response::error(int code, const ServerBlock& server) {
-	Response r;
+	Response	r;
 	r.setStatus(code);
 
-	const std::string codeStr = _intToString(code);
-	std::string body;
-	bool ok = false;
+	const std::string	codeStr = _intToString(code);
+	std::string	body;
+	bool	ok = false;
 
-	const std::map<std::string, std::string>& pages = server.getErrorPages();
-	std::map<std::string, std::string>::const_iterator it = pages.find(codeStr);
+	const std::map<std::string, std::string>&	pages = server.getErrorPages();
+	std::map<std::string, std::string>::const_iterator	it = pages.find(codeStr);
 	if (it != pages.end())
 		ok = _readFileToString(it->second, body);
 
@@ -112,8 +112,8 @@ Response Response::error(int code, const ServerBlock& server) {
 }
 
 std::string	Response::serialize() const {
-	const ErrorInfo* e = _lookupError(_status);
-	std::string out;
+	const ErrorInfo*	e = _lookupError(_status);
+	std::string	out;
 
 	out += "HTTP/1.1 ";
 	out += _intToString(_status);

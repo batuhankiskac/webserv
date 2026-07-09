@@ -23,32 +23,32 @@ void RequestParser::_setError(int code) {
 }
 
 std::string RequestParser::_trim(const std::string& str, const std::string& chars) {
-	size_t start = str.find_first_not_of(chars);
+	size_t	start = str.find_first_not_of(chars);
 	if (start == std::string::npos) {
 		return "";
 	}
-	size_t end = str.find_last_not_of(chars);
+	size_t	end = str.find_last_not_of(chars);
 	return str.substr(start, end - start + 1);
 }
 
 void RequestParser::_parseRequestLine(const std::string& line) {
-	size_t methodEnd = line.find(' ');
+	size_t	methodEnd = line.find(' ');
 	if (methodEnd == std::string::npos) {
 		_setError(400);
 		return;
 	}
 
-	size_t pathEnd = line.find(' ', methodEnd + 1);
+	size_t	pathEnd = line.find(' ', methodEnd + 1);
 	if (pathEnd == std::string::npos) {
 		_setError(400);
 		return;
 	}
 
 	_method = line.substr(0, methodEnd);
-	std::string fullPath = line.substr(methodEnd + 1, pathEnd - methodEnd - 1);
+	std::string	fullPath = line.substr(methodEnd + 1, pathEnd - methodEnd - 1);
 	_httpVersion = line.substr(pathEnd + 1);
 
-	size_t queryPos = fullPath.find('?');
+	size_t	queryPos = fullPath.find('?');
 	if (queryPos != std::string::npos) {
 		_path = fullPath.substr(0, queryPos);
 		_queryString = fullPath.substr(queryPos + 1);
@@ -66,35 +66,35 @@ void RequestParser::_parseRequestLine(const std::string& line) {
 }
 
 void RequestParser::_parseHeaderLine(const std::string& line) {
-	size_t colonPos = line.find(':');
+	size_t	colonPos = line.find(':');
 	if (colonPos == std::string::npos) {
 		_setError(400);
 		return;
 	}
 
-	std::string key = line.substr(0, colonPos);
-	std::string value = _trim(line.substr(colonPos + 1));
+	std::string	key = line.substr(0, colonPos);
+	std::string	value = _trim(line.substr(colonPos + 1));
 
 	_headers[key] = value;
 }
 
 bool RequestParser::_handleRequestLine() {
-	size_t pos = _buffer.find("\r\n", _readIndex);
+	size_t	pos = _buffer.find("\r\n", _readIndex);
 	if (pos == std::string::npos) {
 		return false;
 	}
-	std::string line = _buffer.substr(_readIndex, pos - _readIndex);
+	std::string	line = _buffer.substr(_readIndex, pos - _readIndex);
 	_readIndex = pos + 2;
 	_parseRequestLine(line);
 	return true;
 }
 
 bool RequestParser::_handleHeaders() {
-	size_t pos = _buffer.find("\r\n", _readIndex);
+	size_t	pos = _buffer.find("\r\n", _readIndex);
 	if (pos == std::string::npos) {
 		return false;
 	}
-	std::string line = _buffer.substr(_readIndex, pos - _readIndex);
+	std::string	line = _buffer.substr(_readIndex, pos - _readIndex);
 	_readIndex = pos + 2;
 	if (line.empty()) {
 		if (_httpVersion == "HTTP/1.1" && _headers.find("host") == _headers.end()) {
@@ -136,7 +136,7 @@ const std::map<std::string, std::string, CaseInsensitiveCompare>& RequestParser:
 }
 
 std::string RequestParser::getHeader(const std::string& key) const {
-	std::map<std::string, std::string, CaseInsensitiveCompare>::const_iterator it = _headers.find(key);
+	std::map<std::string, std::string, CaseInsensitiveCompare>::const_iterator	it = _headers.find(key);
 	if (it == _headers.end()) {
 		return "";
 	}
@@ -144,8 +144,8 @@ std::string RequestParser::getHeader(const std::string& key) const {
 }
 
 long long RequestParser::getContentLength() const {
-	std::string val = getHeader("content-length");
-	std::string digits;
+	std::string	val = getHeader("content-length");
+	std::string	digits;
 	for (size_t i = 0; i < val.size(); ++i) {
 		if (!std::isdigit(static_cast<unsigned char>(val[i]))) {
 			break;
@@ -155,8 +155,8 @@ long long RequestParser::getContentLength() const {
 	if (digits.empty()) {
 		return -1;
 	}
-	std::stringstream ss(digits);
-	long long result;
+	std::stringstream	ss(digits);
+	long long	result;
 	ss >> result;
 	if (ss.fail()) {
 		return -1;
@@ -165,8 +165,8 @@ long long RequestParser::getContentLength() const {
 }
 
 bool RequestParser::isChunked() const {
-	std::string val = getHeader("transfer-encoding");
-	std::string lower = val;
+	std::string	val = getHeader("transfer-encoding");
+	std::string	lower = val;
 	std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
 	return lower.find("chunked") != std::string::npos;
 }
