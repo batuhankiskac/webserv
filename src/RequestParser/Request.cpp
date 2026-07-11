@@ -216,10 +216,10 @@ int Request::readFd(struct Client &client, File& file)
 				}
 				const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd);
 				if (!result)
-				{
-					close(client.requestBodyFd);
-					client.state = REQUEST_COMPLETE;
-				}
+			{
+				client.contentLength = client.bodyReceived;
+				client.state = REQUEST_COMPLETE;
+			}
 				else if (result < 0)
 				{
 					if (result <= -HTTP_BAD_REQUEST)

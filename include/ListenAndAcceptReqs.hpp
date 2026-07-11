@@ -37,11 +37,14 @@ class ListenAndAcceptReqs
 		std::vector<struct epoll_event> epollEvents;
 		std::map<int, Client> clients;
 
+		std::map<int, int> cgiReadFdToClientFd;
+
 		File& file;
 		const WebservConfig& config;
 
 		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
 		bool	_sendErrorAndMod(int fd, Client& client, int code);
+		void	_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour);
 
 		class ListenOrAcceptionError : public std::exception
 		{

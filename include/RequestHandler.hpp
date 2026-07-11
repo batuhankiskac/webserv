@@ -3,6 +3,8 @@
 
 #include "Client.hpp"
 #include "WebservConfig.hpp"
+#include <vector>
+#include <string>
 
 class RequestHandler {
 private:
@@ -15,6 +17,8 @@ private:
 	static void _handlePost(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);
 	static void _handleDelete(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);
 	static std::string _generateAutoindex(const std::string& filePath, const std::string& reqPath);
+	static char** _buildCgiEnv(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath, std::vector<std::string>& envStorage);
+	static void _handleCgi(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);
 
 public:
 	static void handle(Client& client, const WebservConfig& config, int port);

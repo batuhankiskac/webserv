@@ -23,7 +23,7 @@ int	File::getNewFileFd(int clientFd)
 	filename += ss.str();
 
 	int fileFd = open(filename.c_str(), 
-						O_WRONLY | O_CREAT | O_APPEND, 
+						O_RDWR | O_CREAT | O_TRUNC, 
 						0644);
 	
 	if (fileFd != -1)

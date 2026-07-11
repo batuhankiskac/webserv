@@ -1,6 +1,61 @@
 #include "ListenAndAcceptReqs.hpp"
 #include "RequestHandler.hpp"
 #include "Response.hpp"
+#include <sys/wait.h>
+#include <csignal>
+#include <sstream>
+#include <cctype>
+#include <string>
+
+static std::string	buildCgiHttpResponse(const std::string& cgiOutput) {
+	std::size_t	sep = cgiOutput.find("\r\n\r\n");
+	std::size_t	sepLen = 4;
+	if (sep == std::string::npos) {
+		sep = cgiOutput.find("\n\n");
+		sepLen = 2;
+	}
+
+	std::string	headerBlock;
+	std::string	body;
+	if (sep != std::string::npos) {
+		headerBlock = cgiOutput.substr(0, sep);
+		body = cgiOutput.substr(sep + sepLen);
+	} else
+		body = cgiOutput;
+
+	int	status = 200;
+	std::string	reason = "OK";
+	std::string	outHeaders;
+
+	std::stringstream	hs(headerBlock);
+	std::string	line;
+	while (std::getline(hs, line)) {
+		if (!line.empty() && line[line.size() - 1] == '\r')
+			line.erase(line.size() - 1);
+		if (line.empty())
+			continue;
+
+		std::string	lower = line;
+		for (std::size_t i = 0; i < lower.size(); ++i)
+			lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lower[i])));
+
+		if (lower.size() >= 7 && lower.substr(0, 7) == "status:") {
+			std::stringstream	ss(line.substr(7));
+			ss >> status >> std::ws;
+			std::getline(ss, reason);
+		} else {
+			outHeaders += line;
+			outHeaders += "\r\n";
+		}
+	}
+
+	std::stringstream	resp;
+	resp << "HTTP/1.1 " << status << " " << reason << "\r\n";
+	resp << outHeaders;
+	resp << "Content-Length: " << static_cast<long>(body.size()) << "\r\n";
+	resp << "Connection: close\r\n\r\n" << body;
+	return (resp.str());
+}
 
 ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
 		File& file, const WebservConfig& config)
@@ -54,6 +109,25 @@ const char* ListenAndAcceptReqs::ListenOrAcceptionError::what() const throw()
 
 void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour)
 {
+	std::map<int, Client>::iterator	it = clients.find(fd);
+	if (it != clients.end())
+	{
+		Client&	client = it->second;
+		if (client.cgiOutFd != -1)
+		{
+			epoll_ctl(epollFd, EPOLL_CTL_DEL, client.cgiOutFd, NULL);
+			cgiReadFdToClientFd.erase(client.cgiOutFd);
+			close(client.cgiOutFd);
+			client.cgiOutFd = -1;
+		}
+		if (client.cgiPid > 0)
+		{
+			kill(client.cgiPid, SIGKILL);
+			waitpid(client.cgiPid, NULL, 0);
+			client.cgiPid = -1;
+		}
+	}
+
 	epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, NULL);
 	close(fd);
 	fdTargetTour.erase(fd);
@@ -84,6 +158,80 @@ bool	ListenAndAcceptReqs::_sendErrorAndMod(int fd, Client& client, int code)
 	return (true);
 }
 
+void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour)
+{
+	std::map<int, int>::iterator	it = cgiReadFdToClientFd.find(cgiFd);
+	if (it == cgiReadFdToClientFd.end())
+		return;
+
+	int	clientFd = it->second;
+	std::map<int, Client>::iterator	cit = clients.find(clientFd);
+	if (cit == clients.end())
+	{
+		epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+		cgiReadFdToClientFd.erase(cgiFd);
+		close(cgiFd);
+		return;
+	}
+
+	Client&	client = cit->second;
+
+	char	buf[4096];
+	ssize_t	n = read(cgiFd, buf, sizeof(buf));
+	if (n == -1)
+	{
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
+			return;
+		epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+		cgiReadFdToClientFd.erase(cgiFd);
+		close(cgiFd);
+		client.cgiOutFd = -1;
+		if (client.cgiPid > 0)
+		{
+			kill(client.cgiPid, SIGKILL);
+			waitpid(client.cgiPid, NULL, 0);
+			client.cgiPid = -1;
+		}
+		client.cgiActive = false;
+		_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
+		return;
+	}
+
+	if (n > 0)
+	{
+		client.cgiResponse.append(buf, static_cast<std::size_t>(n));
+		return;
+	}
+
+	epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+	cgiReadFdToClientFd.erase(cgiFd);
+	close(cgiFd);
+	client.cgiOutFd = -1;
+
+	if (client.cgiPid > 0)
+	{
+		waitpid(client.cgiPid, NULL, 0);
+		client.cgiPid = -1;
+	}
+
+	if (client.cgiResponse.empty())
+	{
+		client.cgiActive = false;
+		_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
+		return;
+	}
+
+	client.response = buildCgiHttpResponse(client.cgiResponse);
+	client.cgiActive = false;
+	client.cgiResponse.clear();
+
+	struct epoll_event	modEvent;
+	modEvent.data.fd = clientFd;
+	modEvent.events = EPOLLOUT;
+	if (epoll_ctl(epollFd, EPOLL_CTL_MOD, clientFd, &modEvent) == -1)
+		cleanupClient(clientFd, fdTargetTour);
+}
+
 void	ListenAndAcceptReqs::waitReqs()
 {
 	const int TICK_RATE = 1;
@@ -111,13 +259,10 @@ void	ListenAndAcceptReqs::waitReqs()
 
 				if (fdTargetTour.count(expired_fd) && fdTargetTour[expired_fd] == tour)
 				{
-					epoll_ctl(epollFd, EPOLL_CTL_DEL, expired_fd, NULL);
-					close(expired_fd);
-					fdTargetTour.erase(expired_fd);
-					clients.erase(expired_fd);
+					cleanupClient(expired_fd, fdTargetTour);
 				}
 			}
-			timerWheel[tour].clear(); 
+			timerWheel[tour].clear();
 		}
 
 		int	readyNum = epoll_wait(epollFd, &epollEvents[0], BUFFER_SIZE, 1000);
@@ -138,6 +283,11 @@ void	ListenAndAcceptReqs::waitReqs()
 				{
 					if (listenFdToPort.count(currentFd))
 						continue ;
+					if (cgiReadFdToClientFd.count(currentFd))
+					{
+						_handleCgiRead(currentFd, fdTargetTour);
+						continue ;
+					}
 					cleanupClient(currentFd, fdTargetTour);
 					continue ;
 				}
@@ -156,7 +306,7 @@ void	ListenAndAcceptReqs::waitReqs()
 					}
 
 					int flags = fcntl(clientSocket, F_GETFL, 0);
-					if (flags == -1 || 
+					if (flags == -1 ||
 						fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK) == -1)
 					{
 						std::cerr << "One connecttion cannot adjust as NONBLOCK."
@@ -175,7 +325,7 @@ void	ListenAndAcceptReqs::waitReqs()
 						close(clientSocket);
 						continue ;
 					}
-					
+
 					struct Client client;
 					client.clientFd = clientSocket;
 					client.port = listenFdToPort[currentFd];
@@ -183,6 +333,13 @@ void	ListenAndAcceptReqs::waitReqs()
 
 					fdTargetTour[clientSocket] = (tour + TIME_OUT) % MAX_TOUR;
 					timerWheel[(tour + TIME_OUT) % MAX_TOUR].push_back(clientSocket);
+					continue ;
+				}
+
+				if (cgiReadFdToClientFd.count(currentFd))
+				{
+					if (epollEvents.at(i).events & EPOLLIN)
+						_handleCgiRead(currentFd, fdTargetTour);
 					continue ;
 				}
 
@@ -197,7 +354,17 @@ void	ListenAndAcceptReqs::waitReqs()
 					update = 1;
 					RequestHandler::handle(clients[currentFd], config, clients[currentFd].port);
 
-					struct epoll_event modEvent;
+					if (clients[currentFd].cgiActive)
+					{
+						struct epoll_event cgiEvent;
+						cgiEvent.events = EPOLLIN;
+						cgiEvent.data.fd = clients[currentFd].cgiOutFd;
+						epoll_ctl(epollFd, EPOLL_CTL_ADD, clients[currentFd].cgiOutFd, &cgiEvent);
+						cgiReadFdToClientFd[clients[currentFd].cgiOutFd] = currentFd;
+					}
+					else
+					{
+						struct epoll_event modEvent;
 						modEvent.data.fd = currentFd;
 						modEvent.events = EPOLLOUT;
 						if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd, &modEvent) == -1)
@@ -205,6 +372,7 @@ void	ListenAndAcceptReqs::waitReqs()
 							disconnect = true;
 						}
 					}
+				}
 					else if (!result && Request::getErrno() == -1)
 					{
 						disconnect = true;
@@ -218,7 +386,7 @@ void	ListenAndAcceptReqs::waitReqs()
 						const int	_errno = Request::getErrno();
 						if (_errno == -1)
 						{
-							// Does nothing. 
+							// Does nothing.
 						}
 						else if (_errno > 0)
 						{
@@ -261,9 +429,9 @@ void	ListenAndAcceptReqs::waitReqs()
 						cleanupClient(currentFd, fdTargetTour);
 						continue ;
 					}
-					
+
 					int	newTourNum = (tour + TIME_OUT) % MAX_TOUR;
-					if (update && 
+					if (update &&
 						fdTargetTour[currentFd] != newTourNum)
 					{
 						timerWheel[newTourNum].push_back(currentFd);

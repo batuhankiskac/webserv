@@ -3,6 +3,7 @@
 
 #include <string>
 #include <unistd.h>
+#include <sys/types.h>
 
 #include "RequestParser.hpp"
 
@@ -31,6 +32,11 @@ struct Client
 	std::string	response;
 
 	RequestParser	request;
+
+	int			cgiOutFd;
+	pid_t		cgiPid;
+	std::string	cgiResponse;
+	bool		cgiActive;
 
 	Client();
 	~Client();
