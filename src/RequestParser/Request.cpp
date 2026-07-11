@@ -65,14 +65,30 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 		{
 			return (-HTTP_PAYLOAD_TOO_LARGE);
 		}
-		ssize_t	written = write(fileFd, rawBuffer.c_str() + crlf_pos + 2, chunk_size);
-		if (written == -1 || written != chunk_size)
+
+		ssize_t written = 0;
+		while (written < static_cast<ssize_t>(chunk_size))
 		{
-			return (-errno);
-		}
-		else
-		{
-			bodyReceived += written;
+			const	ssize_t remaining = chunk_size - written;
+			const	char* current_ptr = rawBuffer.c_str() + crlf_pos + 2 + written;
+			const	ssize_t result = write(fileFd, current_ptr, remaining);
+
+			if (result == -1)
+			{
+				if (errno == EAGAIN || errno == EWOULDBLOCK)
+				{
+					continue ; 
+				}
+				else
+				{
+					return (-errno);
+				}
+			}
+			else
+			{
+				bodyReceived += result;
+				written += result;
+			}
 		}
 
 		rawBuffer.erase(0, total_chunk_bytes);
