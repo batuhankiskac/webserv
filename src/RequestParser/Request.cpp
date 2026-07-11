@@ -61,7 +61,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 			return (-HTTP_BAD_REQUEST);
 		}
 
-		if (bodyReceived + chunk_size > MAX_BODY_SIZE)
+		if (bodyReceived + chunk_size >= MAX_BODY_SIZE)
 		{
 			return (-HTTP_PAYLOAD_TOO_LARGE);
 		}
