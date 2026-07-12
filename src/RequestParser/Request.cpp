@@ -197,8 +197,7 @@ int Request::readFd(struct Client &client, File& file)
 					const int	written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
 					if (written == -1)
 					{
-						_errno = errno;
-						return (-1);
+						return (-HTTP_INTERNAL_SERVER_ERROR);
 					}
 					else if (written != val)
 					{
