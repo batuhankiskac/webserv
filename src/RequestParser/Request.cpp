@@ -75,20 +75,11 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 
 			if (result == -1)
 			{
-				if (errno == EAGAIN || errno == EWOULDBLOCK)
-				{
-					continue ; 
-				}
-				else
-				{
-					return (-errno);
-				}
+				return (-HTTP_INTERNAL_SERVER_ERROR);
 			}
-			else
-			{
-				bodyReceived += result;
-				written += result;
-			}
+
+			bodyReceived += result;
+			written += result;
 		}
 
 		rawBuffer.erase(0, total_chunk_bytes);
