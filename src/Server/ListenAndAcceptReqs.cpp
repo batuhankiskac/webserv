@@ -57,6 +57,17 @@ static std::string	buildCgiHttpResponse(const std::string& cgiOutput) {
 	return (resp.str());
 }
 
+size_t	ListenAndAcceptReqs::_getMaxBodySize(int port) const
+{
+	const std::vector<ServerBlock>&	servers = config.getServers();
+	for (std::size_t i = 0; i < servers.size(); ++i)
+	{
+		if (servers[i].getPort() == port)
+			return (servers[i].getClientMaxBodySize());
+	}
+	return (servers[0].getClientMaxBodySize());
+}
+
 ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
 		File& file, const WebservConfig& config)
 	: epollFd(-1), file(file), config(config)
@@ -309,7 +320,7 @@ void	ListenAndAcceptReqs::waitReqs()
 					if (flags == -1 ||
 						fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK) == -1)
 					{
-						std::cerr << "One connecttion cannot adjust as NONBLOCK."
+						std::cerr << "One connection cannot adjust as NONBLOCK."
 							<< std::endl;
 						close(clientSocket);
 						continue ;
@@ -348,7 +359,7 @@ void	ListenAndAcceptReqs::waitReqs()
 					int	update = 0;
 					bool disconnect = false;
 
-				const int result = Request::readFd(clients[currentFd], file);
+				const int result = Request::readFd(clients[currentFd], file, _getMaxBodySize(clients[currentFd].port));
 				if (!result && !Request::getErrno())
 				{
 					update = 1;

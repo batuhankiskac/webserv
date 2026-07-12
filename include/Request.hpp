@@ -16,7 +16,6 @@
 #define CHUNK_SEMI_SIZE		256
 #define MAX_REQUEST_LINE	8192
 #define MAX_HEADERS_SIZE	32768
-#define MAX_BODY_SIZE		1048576
 
 class Request
 {
@@ -24,7 +23,7 @@ class Request
 		static int	_errno;
 
 	public:
-		static int	readFd(struct Client &client, File& file);
+		static int	readFd(struct Client &client, File& file, size_t maxBodySize);
 		static int	getErrno();
 };
 

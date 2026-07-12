@@ -3,7 +3,7 @@
 
 int	Request::_errno = 0;
 
-static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fileFd)
+static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fileFd, const size_t maxBodySize)
 {
 	while (!rawBuffer.empty())
 	{
@@ -61,7 +61,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 			return (-HTTP_BAD_REQUEST);
 		}
 
-		if (bodyReceived + chunk_size >= MAX_BODY_SIZE)
+		if (bodyReceived + chunk_size >= maxBodySize)
 		{
 			return (-HTTP_PAYLOAD_TOO_LARGE);
 		}
@@ -88,7 +88,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 	return (1); 
 }
 
-int Request::readFd(struct Client &client, File& file)
+int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 {
 	_errno = 0;
 	if (client.clientFd == -1)
@@ -147,7 +147,7 @@ int Request::readFd(struct Client &client, File& file)
 					}
 					else if (client.contentLength > 0)
 					{
-						if (client.contentLength >= MAX_BODY_SIZE)
+						if (client.contentLength >= maxBodySize)
 						{
 							_errno = -HTTP_PAYLOAD_TOO_LARGE;
 							return (-1);
@@ -220,7 +220,7 @@ int Request::readFd(struct Client &client, File& file)
 						return (-1);
 					}
 				}
-				const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd);
+				const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd, maxBodySize);
 				if (!result)
 			{
 				client.contentLength = client.bodyReceived;

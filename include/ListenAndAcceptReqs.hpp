@@ -42,6 +42,7 @@ class ListenAndAcceptReqs
 		File& file;
 		const WebservConfig& config;
 
+		size_t	_getMaxBodySize(int port) const;
 		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
 		bool	_sendErrorAndMod(int fd, Client& client, int code);
 		void	_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour);
