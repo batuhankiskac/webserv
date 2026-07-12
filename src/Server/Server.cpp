@@ -26,7 +26,25 @@ Server::Server(std::string ip, int port) : port(port)
 	if (ip.empty())
 		socketAddress.sin_addr.s_addr = INADDR_ANY;
 	else
-		socketAddress.sin_addr.s_addr = inet_addr(ip.c_str());
+	{
+		struct addrinfo	hints;
+		hints.ai_flags = 0;
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_protocol = 0;
+		hints.ai_addrlen = 0;
+		hints.ai_addr = NULL;
+		hints.ai_canonname = NULL;
+		hints.ai_next = NULL;
+		struct addrinfo*	res = NULL;
+		if (getaddrinfo(ip.c_str(), NULL, &hints, &res) != 0)
+		{
+			close(socketFd);
+			throw Server::SocketCreationError();
+		}
+		socketAddress.sin_addr = reinterpret_cast<struct sockaddr_in*>(res->ai_addr)->sin_addr;
+		freeaddrinfo(res);
+	}
 
 	if (bind(socketFd, (struct sockaddr*)&socketAddress, sizeof(socketAddress)) < 0)
 	{

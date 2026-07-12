@@ -19,6 +19,7 @@ struct Client
 {
 	int			clientFd;
 	int			requestBodyFd;
+	std::string	requestBodyPath;
 	int			port;
 
 	long long	contentLength;

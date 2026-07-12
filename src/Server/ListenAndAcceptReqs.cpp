@@ -248,14 +248,14 @@ void	ListenAndAcceptReqs::waitReqs()
 	const int TICK_RATE = 1;
 	epollEvents.resize(BUFFER_SIZE);
 
-	time_t	lastTick = time(NULL);
+	time_t	lastTick = std::time(NULL);
 	int	tour = 0;
 	std::map<int, int> fdTargetTour;
 	std::vector<std::vector<int> > timerWheel(MAX_TOUR);
 
 	while (true)
 	{
-		const time_t now = time(NULL);
+		const time_t now = std::time(NULL);
 
 		while (now - lastTick >= TICK_RATE)
 		{

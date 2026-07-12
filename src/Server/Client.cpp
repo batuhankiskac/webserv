@@ -3,6 +3,7 @@
 Client::Client() :
 		clientFd(-1),
 		requestBodyFd(-1),
+		requestBodyPath(""),
 		port(-1),
 		contentLength(-1),
 		state(READING_HEADERS),

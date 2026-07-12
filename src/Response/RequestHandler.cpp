@@ -294,7 +294,14 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 
 	int stdinFd = -1;
 	if (client.requestBodyFd != -1) {
-		lseek(client.requestBodyFd, 0, SEEK_SET);
+		close(client.requestBodyFd);
+		client.requestBodyFd = open(client.requestBodyPath.c_str(), O_RDONLY, 0644);
+		if (client.requestBodyFd == -1) {
+			close(cgiOut[0]);
+			close(cgiOut[1]);
+			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+			return;
+		}
 		stdinFd = client.requestBodyFd;
 	} else if (!client.requestBody.empty()) {
 		std::stringstream ss;
@@ -308,7 +315,14 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 			return;
 		}
 		write(stdinFd, client.requestBody.c_str(), client.requestBody.size());
-		lseek(stdinFd, 0, SEEK_SET);
+		close(stdinFd);
+		stdinFd = open(tmpPath.c_str(), O_RDONLY, 0600);
+		if (stdinFd == -1) {
+			close(cgiOut[0]);
+			close(cgiOut[1]);
+			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+			return;
+		}
 	}
 
 	std::vector<std::string> envStorage;
@@ -379,7 +393,7 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 	}
 
 	std::stringstream	nameSS;
-	nameSS << "upload_" << time(NULL) << "_" << client.clientFd << ".dat";
+	nameSS << "upload_" << std::time(NULL) << "_" << client.clientFd << ".dat";
 	std::string	filename = nameSS.str();
 
 	std::string	targetPath = uploadStore;
@@ -396,7 +410,9 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 			written = !out.bad();
 		}
 	} else if (client.requestBodyFd != -1) {
-		if (lseek(client.requestBodyFd, 0, SEEK_SET) == static_cast<off_t>(-1)) {
+		close(client.requestBodyFd);
+		client.requestBodyFd = open(client.requestBodyPath.c_str(), O_RDONLY, 0644);
+		if (client.requestBodyFd == -1) {
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
