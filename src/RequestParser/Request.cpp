@@ -237,7 +237,8 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 						_errno = result;
 					else
 						_errno = -result;
-					close(client.requestBodyFd);
+					file.closeFile(client.clientFd);
+					client.requestBodyFd = -1;
 					return (-1);
 				}
 			}
