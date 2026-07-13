@@ -14,8 +14,6 @@ Client::Client() :
 
 Client::~Client()
 {
-	if (requestBodyFd != -1)
-		close(requestBodyFd);
 	if (cgiOutFd != -1)
 		close(cgiOutFd);
 }
