@@ -316,9 +316,7 @@ void	ListenAndAcceptReqs::waitReqs()
 						continue ;
 					}
 
-					int flags = fcntl(clientSocket, F_GETFL, 0);
-					if (flags == -1 ||
-						fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK) == -1)
+					if (fcntl(clientSocket, F_SETFL, O_NONBLOCK) == -1)
 					{
 						std::cerr << "One connection cannot adjust as NONBLOCK."
 							<< std::endl;
