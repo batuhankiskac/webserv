@@ -58,5 +58,5 @@ int	main(int argc, char** argv)
 	for (std::size_t i = 0; i < servers.size(); ++i)
 		delete servers[i];
 
-	return (1);
+	return (0);
 }
