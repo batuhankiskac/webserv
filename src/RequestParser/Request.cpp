@@ -162,7 +162,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 			}
 			if (client.state == READING_BODY)
 			{
-				const int	val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived) 
+				const std::size_t	val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived) 
 									? (client.contentLength - client.bodyReceived) : client.rawBuffer.size();
 
 				if (client.bodyReceived + val > static_cast<std::size_t>(client.contentLength))
