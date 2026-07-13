@@ -459,15 +459,8 @@ void	ListenAndAcceptReqs::waitReqs()
 					ssize_t sent = send(currentFd, resp.c_str(), resp.size(), 0);
 					if (sent == -1)
 					{
-						if (errno == EAGAIN || errno == EWOULDBLOCK)
-						{
-							// Yazma tamponu dolu, bir sonraki EPOLLOUT beklenir.
-						}
-						else
-						{
 							cleanupClient(currentFd, fdTargetTour);
 							continue ;
-						}
 					}
 					else if (sent == 0)
 					{
