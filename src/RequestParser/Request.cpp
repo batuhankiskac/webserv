@@ -193,6 +193,8 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					const int	written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
 					if (written == -1)
 					{
+						file.closeFile(client.clientFd);
+						client.requestBodyFd = -1;
 						_errno = -HTTP_INTERNAL_SERVER_ERROR;
 						return (-1);
 					}
@@ -203,7 +205,11 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					}
 					client.rawBuffer.erase(0, val);
 					if (client.bodyReceived == static_cast<std::size_t>(client.contentLength))
+					{
+						file.closeFile(client.clientFd);
+						client.requestBodyFd = -1;
 						client.state = REQUEST_COMPLETE;
+					}
 				}
 			}
 			if (client.state == READING_CHUNKS)
@@ -219,10 +225,12 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 				}
 				const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd, maxBodySize);
 				if (!result)
-			{
-				client.contentLength = client.bodyReceived;
-				client.state = REQUEST_COMPLETE;
-			}
+				{
+					file.closeFile(client.clientFd);
+					client.requestBodyFd = -1;
+					client.contentLength = client.bodyReceived;
+					client.state = REQUEST_COMPLETE;
+				}
 				else if (result < 0)
 				{
 					if (result <= -HTTP_BAD_REQUEST)
