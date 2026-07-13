@@ -189,21 +189,25 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 							return (-1);
 						}
 					}
-					client.bodyReceived += val;
-					const int	written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
-					if (written == -1)
+
+					std::size_t total_written = 0;
+					while (total_written < val)
 					{
-						file.closeFile(client.clientFd);
-						client.requestBodyFd = -1;
-						_errno = -HTTP_INTERNAL_SERVER_ERROR;
-						return (-1);
+						const ssize_t written = write(client.requestBodyFd, 
+													client.rawBuffer.c_str() + total_written, 
+													val - total_written);
+
+						if (written <= 0)
+						{
+							file.closeFile(client.clientFd);
+							client.requestBodyFd = -1;
+							_errno = -HTTP_INTERNAL_SERVER_ERROR;
+							return (-1); 
+						}
+						total_written += written;
 					}
-					else if (written != val)
-					{
-						client.rawBuffer.erase(0, written);
-						return (1);
-					}
-					client.rawBuffer.erase(0, val);
+					client.bodyReceived += total_written;
+					client.rawBuffer.erase(0, total_written);
 					if (client.bodyReceived == static_cast<std::size_t>(client.contentLength))
 					{
 						file.closeFile(client.clientFd);
