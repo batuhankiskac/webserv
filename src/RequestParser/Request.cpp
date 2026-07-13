@@ -97,16 +97,12 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 		return (-1);
 	}
 
-	while (1)
 	{
 		char	buffer[MAX_REQUEST_LINE];
 		int	result = recv(client.clientFd, buffer, sizeof(buffer), 0);
 		if (result == -1)
 		{
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return (1);
-
-			_errno = errno;
+			_errno = -HTTP_INTERNAL_SERVER_ERROR;
 			return (-1);
 		}
 		else if (result == 0)
@@ -197,7 +193,8 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					const int	written = write(client.requestBodyFd, client.rawBuffer.c_str(), val);
 					if (written == -1)
 					{
-						return (-HTTP_INTERNAL_SERVER_ERROR);
+						_errno = -HTTP_INTERNAL_SERVER_ERROR;
+						return (-1);
 					}
 					else if (written != val)
 					{
