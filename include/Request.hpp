@@ -2,7 +2,7 @@
 #define REQUEST_HPP
 
 #include <sys/socket.h>
-#include <errno.h>
+#include <cerrno>
 #include <cctype>
 #include <string>
 #include <sstream>
