@@ -1,6 +1,6 @@
 #include "File.hpp"
 
-File::File() {}
+File::File() : _errno(0) {}
 
 File::~File() {}
 
