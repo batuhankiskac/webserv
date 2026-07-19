@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <cctype>
 #include <cstdlib>
+#include <cstdio>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -334,7 +335,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 			close(stdinFd);
 		}
 		if (chdir(loc.getRoot().c_str()) == -1)
-			exit(1);
+			std::exit(1);
 		std::string locPath = loc.getPath();
 		std::string relativePath;
 		if (reqPath.size() > locPath.size())
@@ -351,7 +352,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		std::string fail = "Status: 500 Internal Server Error\r\n"
 		                   "Content-Type: text/plain\r\n\r\nCGI execution failed";
 		write(STDOUT_FILENO, fail.c_str(), fail.size());
-		exit(1);
+		std::exit(1);
 	}
 
 	close(cgiOut[1]);
@@ -451,7 +452,7 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 		return;
 	}
 
-	if (unlink(filePath.c_str()) != 0) {
+	if (std::remove(filePath.c_str()) != 0) {
 		int	err = errno;
 		if (err == EACCES || err == EPERM)
 			_serveError(client, HTTP_FORBIDDEN, server);

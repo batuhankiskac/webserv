@@ -143,7 +143,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					}
 					else if (client.contentLength > 0)
 					{
-						if (client.contentLength >= maxBodySize)
+						if (client.contentLength >= static_cast<long long>(maxBodySize))
 						{
 							_errno = -HTTP_PAYLOAD_TOO_LARGE;
 							return (-1);
