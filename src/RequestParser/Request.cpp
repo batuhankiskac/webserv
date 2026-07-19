@@ -210,8 +210,6 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					client.rawBuffer.erase(0, total_written);
 					if (client.bodyReceived == static_cast<std::size_t>(client.contentLength))
 					{
-						file.closeFile(client.clientFd);
-						client.requestBodyFd = -1;
 						client.state = REQUEST_COMPLETE;
 					}
 				}
@@ -227,14 +225,12 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 						return (-1);
 					}
 				}
-				const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd, maxBodySize);
-				if (!result)
-				{
-					file.closeFile(client.clientFd);
-					client.requestBodyFd = -1;
-					client.contentLength = client.bodyReceived;
-					client.state = REQUEST_COMPLETE;
-				}
+			const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd, maxBodySize);
+			if (!result)
+			{
+				client.contentLength = client.bodyReceived;
+				client.state = REQUEST_COMPLETE;
+			}
 				else if (result < 0)
 				{
 					if (result <= -HTTP_BAD_REQUEST)

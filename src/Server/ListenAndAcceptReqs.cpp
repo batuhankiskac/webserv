@@ -137,6 +137,11 @@ void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour
 			waitpid(client.cgiPid, NULL, 0);
 			client.cgiPid = -1;
 		}
+		if (client.requestBodyFd != -1)
+		{
+			file.closeFile(client.clientFd);
+			client.requestBodyFd = -1;
+		}
 	}
 
 	epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, NULL);
