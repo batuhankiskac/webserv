@@ -47,6 +47,14 @@ void RequestParser::_parseRequestLine(const std::string& line) {
 	_method = line.substr(0, methodEnd);
 	std::string	fullPath = line.substr(methodEnd + 1, pathEnd - methodEnd - 1);
 	_httpVersion = line.substr(pathEnd + 1);
+	if (_method.empty() || fullPath.empty() || _httpVersion.empty()) {
+		_setError(400);
+		return;
+	}
+	if (fullPath.size() > 8190) {
+		_setError(414);
+		return;
+	}
 
 	size_t	queryPos = fullPath.find('?');
 	if (queryPos != std::string::npos) {
@@ -75,7 +83,30 @@ void RequestParser::_parseHeaderLine(const std::string& line) {
 	std::string	key = line.substr(0, colonPos);
 	std::string	value = _trim(line.substr(colonPos + 1));
 
+	if (key.empty() || _headers.find(key) != _headers.end()) {
+		_setError(400);
+		return;
+	}
 	_headers[key] = value;
+}
+
+void RequestParser::_validateHeaders() {
+	std::string cl = getHeader("content-length");
+	for (size_t i = 0; i < cl.size(); ++i) {
+		if (!std::isdigit(static_cast<unsigned char>(cl[i]))) {
+			_setError(400);
+			return;
+		}
+	}
+	if (!cl.empty() && !getHeader("transfer-encoding").empty()) {
+		_setError(400);
+		return;
+	}
+	std::string te = getHeader("transfer-encoding");
+	std::string lower = te;
+	std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+	if (!te.empty() && lower != "chunked")
+		_setError(400);
 }
 
 bool RequestParser::_handleRequestLine() {
@@ -97,7 +128,10 @@ bool RequestParser::_handleHeaders() {
 	std::string	line = _buffer.substr(_readIndex, pos - _readIndex);
 	_readIndex = pos + 2;
 	if (line.empty()) {
-		if (_httpVersion == "HTTP/1.1" && _headers.find("host") == _headers.end()) {
+		_validateHeaders();
+		if (_phase == ERROR)
+			return true;
+		if (_httpVersion == "HTTP/1.1" && getHeader("host").empty()) {
 			_setError(400);
 		} else {
 			_phase = COMPLETE;
@@ -145,20 +179,13 @@ std::string RequestParser::getHeader(const std::string& key) const {
 
 long long RequestParser::getContentLength() const {
 	std::string	val = getHeader("content-length");
-	std::string	digits;
-	for (size_t i = 0; i < val.size(); ++i) {
-		if (!std::isdigit(static_cast<unsigned char>(val[i]))) {
-			break;
-		}
-		digits += val[i];
-	}
-	if (digits.empty()) {
+	if (val.empty()) {
 		return -1;
 	}
-	std::stringstream	ss(digits);
-	long long	result;
+	std::stringstream	ss(val);
+	long long	result = -1;
 	ss >> result;
-	if (ss.fail()) {
+	if (ss.fail() || result < 0) {
 		return -1;
 	}
 	return result;

@@ -51,9 +51,12 @@ size_t ServerBlock::_parseSizeWithUnit(const std::string& value, const std::stri
 	}
 
 	std::stringstream	ss(numStr);
-	size_t	size;
+	for (size_t i = 0; i < numStr.size(); ++i)
+		if (!std::isdigit(static_cast<unsigned char>(numStr[i])))
+			throw std::runtime_error("Invalid " + name + " directive");
+	size_t	size = 0;
 	ss >> size;
-	if (ss.fail()) {
+	if (ss.fail() || !ss.eof()) {
 		throw std::runtime_error("Invalid " + name + " directive");
 	}
 
@@ -106,8 +109,12 @@ void ServerBlock::_parseListen(const std::vector<std::string>& _tokens, size_t& 
 	}
 
 	std::stringstream	ss(portStr);
+	if (portStr.empty()) throw std::runtime_error("Invalid listen directive");
+	for (size_t j = 0; j < portStr.size(); ++j)
+		if (!std::isdigit(static_cast<unsigned char>(portStr[j])))
+			throw std::runtime_error("Invalid listen directive");
 	ss >> _port;
-	if (ss.fail()) {
+	if (ss.fail() || !ss.eof() || _port < 1 || _port > 65535) {
 		throw std::runtime_error("Invalid listen directive");
 	}
 

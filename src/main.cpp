@@ -51,6 +51,10 @@ int	main(int argc, char** argv)
 	}
 	catch (const std::exception& e) {
 		std::cerr << "webserv: " << e.what() << std::endl;
+		delete listener;
+		for (std::size_t i = 0; i < servers.size(); ++i)
+			delete servers[i];
+		return (1);
 	}
 
 	delete listener;

@@ -3,7 +3,7 @@
 
 int	Request::_errno = 0;
 
-static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fileFd, const size_t maxBodySize)
+static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fileFd, std::string& body, const size_t maxBodySize)
 {
 	while (!rawBuffer.empty())
 	{
@@ -27,6 +27,8 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 		{
 			size_str = size_line;
 		}
+		if (size_str.empty())
+			return (-HTTP_BAD_REQUEST);
 		
 		char*	end_ptr;
 		long	chunk_size = std::strtol(size_str.c_str(), &end_ptr, 16);
@@ -39,16 +41,26 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 
 		if (chunk_size == 0)
 		{
-			if (rawBuffer.length() >= crlf_pos + 4)
-			{
-				if (rawBuffer.compare(crlf_pos + 2, 2, "\r\n") == 0)
-				{
-					rawBuffer.erase(0, crlf_pos + 4);
-					return (0);
-				}
-				return (-HTTP_BAD_REQUEST);
+			if (rawBuffer.size() >= crlf_pos + 4 && rawBuffer.compare(crlf_pos + 2, 2, "\r\n") == 0) {
+				rawBuffer.erase(0, crlf_pos + 4);
+				return (0);
 			}
-			return (1);
+			std::size_t trailerEnd = rawBuffer.find("\r\n\r\n", crlf_pos + 2);
+			if (trailerEnd == std::string::npos)
+				return (1);
+			std::string trailers = rawBuffer.substr(crlf_pos + 2, trailerEnd - crlf_pos - 2);
+			if (!trailers.empty()) {
+				std::size_t start = 0;
+				while (start < trailers.size()) {
+					std::size_t end = trailers.find("\r\n", start);
+					if (end == std::string::npos) end = trailers.size();
+					if (trailers.find(':', start) == std::string::npos || trailers.find(':', start) > end)
+						return (-HTTP_BAD_REQUEST);
+					start = end + 2;
+				}
+			}
+			rawBuffer.erase(0, trailerEnd + 4);
+			return (0);
 		}
 
 		std::size_t	total_chunk_bytes = crlf_pos + 2 + chunk_size + 2;
@@ -61,7 +73,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 			return (-HTTP_BAD_REQUEST);
 		}
 
-		if (bodyReceived + chunk_size >= maxBodySize)
+		if (bodyReceived + static_cast<std::size_t>(chunk_size) > maxBodySize)
 		{
 			return (-HTTP_PAYLOAD_TOO_LARGE);
 		}
@@ -79,6 +91,7 @@ static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived, int fi
 			}
 
 			bodyReceived += result;
+			body.append(current_ptr, static_cast<std::size_t>(result));
 			written += result;
 		}
 
@@ -116,6 +129,12 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 
 			if (client.state == READING_HEADERS)
 			{
+				std::size_t firstLine = client.rawBuffer.find("\r\n");
+				if (firstLine != std::string::npos && firstLine > MAX_REQUEST_LINE)
+				{
+					_errno = -HTTP_URI_TOO_LONG;
+					return (-1);
+				}
 				if (client.rawBuffer.size()> MAX_HEADERS_SIZE)
 				{
 					_errno = -HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
@@ -143,7 +162,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					}
 					else if (client.contentLength > 0)
 					{
-						if (client.contentLength >= static_cast<long long>(maxBodySize))
+						if (client.contentLength > static_cast<long long>(maxBodySize))
 						{
 							_errno = -HTTP_PAYLOAD_TOO_LARGE;
 							return (-1);
@@ -188,6 +207,9 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 							_errno = -2;
 							return (-1);
 						}
+						std::stringstream bodyPath;
+						bodyPath << file.getPath() << client.clientFd;
+						client.requestBodyPath = bodyPath.str();
 					}
 
 					std::size_t total_written = 0;
@@ -207,6 +229,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 						total_written += written;
 					}
 					client.bodyReceived += total_written;
+					client.requestBody.append(client.rawBuffer.substr(0, total_written));
 					client.rawBuffer.erase(0, total_written);
 					if (client.bodyReceived == static_cast<std::size_t>(client.contentLength))
 					{
@@ -225,7 +248,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 						return (-1);
 					}
 				}
-			const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd, maxBodySize);
+			const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd, client.requestBody, maxBodySize);
 			if (!result)
 			{
 				client.contentLength = client.bodyReceived;
@@ -256,4 +279,3 @@ int	Request::getErrno()
 {
 	return (_errno);
 }
-

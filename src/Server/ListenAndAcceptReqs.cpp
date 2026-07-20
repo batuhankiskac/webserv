@@ -78,6 +78,7 @@ ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
 	epollFd = epoll_create(1);
 	if (epollFd == -1)
 		throw (ListenAndAcceptReqs::ListenOrAcceptionError());
+	fcntl(epollFd, F_SETFD, FD_CLOEXEC);
 
 	for (std::size_t i = 0; i < servers.size(); ++i)
 	{
@@ -134,7 +135,7 @@ void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour
 		if (client.cgiPid > 0)
 		{
 			kill(client.cgiPid, SIGKILL);
-			waitpid(client.cgiPid, NULL, 0);
+			waitpid(client.cgiPid, NULL, WNOHANG);
 			client.cgiPid = -1;
 		}
 		if (client.requestBodyFd != -1)
@@ -196,8 +197,6 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 	ssize_t	n = read(cgiFd, buf, sizeof(buf));
 	if (n == -1)
 	{
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			return;
 		epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
 		cgiReadFdToClientFd.erase(cgiFd);
 		close(cgiFd);
@@ -205,7 +204,7 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 		if (client.cgiPid > 0)
 		{
 			kill(client.cgiPid, SIGKILL);
-			waitpid(client.cgiPid, NULL, 0);
+			waitpid(client.cgiPid, NULL, WNOHANG);
 			client.cgiPid = -1;
 		}
 		client.cgiActive = false;
@@ -215,6 +214,16 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 
 	if (n > 0)
 	{
+		if (client.cgiResponse.size() + static_cast<std::size_t>(n) > 8 * 1024 * 1024) {
+			epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+			cgiReadFdToClientFd.erase(cgiFd);
+			close(cgiFd);
+			client.cgiOutFd = -1;
+			if (client.cgiPid > 0) { kill(client.cgiPid, SIGKILL); waitpid(client.cgiPid, NULL, WNOHANG); client.cgiPid = -1; }
+			client.cgiActive = false;
+			_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
+			return;
+		}
 		client.cgiResponse.append(buf, static_cast<std::size_t>(n));
 		return;
 	}
@@ -225,10 +234,7 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 	client.cgiOutFd = -1;
 
 	if (client.cgiPid > 0)
-	{
-		waitpid(client.cgiPid, NULL, 0);
-		client.cgiPid = -1;
-	}
+		waitpid(client.cgiPid, NULL, WNOHANG);
 
 	if (client.cgiResponse.empty())
 	{
@@ -253,14 +259,14 @@ void	ListenAndAcceptReqs::waitReqs()
 	const int TICK_RATE = 1;
 	epollEvents.resize(BUFFER_SIZE);
 
-	time_t	lastTick = time(NULL);
+	time_t	lastTick = std::time(NULL);
 	int	tour = 0;
 	std::map<int, int> fdTargetTour;
 	std::vector<std::vector<int> > timerWheel(MAX_TOUR);
 
 	while (true)
 	{
-		const time_t now = time(NULL);
+		const time_t now = std::time(NULL);
 
 		while (now - lastTick >= TICK_RATE)
 		{
@@ -344,6 +350,7 @@ void	ListenAndAcceptReqs::waitReqs()
 					client.clientFd = clientSocket;
 					client.port = listenFdToPort[currentFd];
 					clients[clientSocket] = client;
+					fcntl(clientSocket, F_SETFD, FD_CLOEXEC);
 
 					fdTargetTour[clientSocket] = (tour + TIME_OUT) % MAX_TOUR;
 					timerWheel[(tour + TIME_OUT) % MAX_TOUR].push_back(clientSocket);
@@ -404,17 +411,10 @@ void	ListenAndAcceptReqs::waitReqs()
 						}
 						else if (_errno > 0)
 						{
-							if (_errno == ECONNRESET || _errno == EPIPE || _errno == ETIMEDOUT)
-							{
+							if (!_sendErrorAndMod(currentFd, clients[currentFd], HTTP_INTERNAL_SERVER_ERROR))
 								disconnect = true;
-							}
 							else
-							{
-								if (!_sendErrorAndMod(currentFd, clients[currentFd], HTTP_INTERNAL_SERVER_ERROR))
-									disconnect = true;
-								else
-									update = 1;
-							}
+								update = 1;
 						}
 						else if (_errno == -2)
 						{

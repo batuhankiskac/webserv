@@ -44,6 +44,7 @@ private:
 
 	void _parseRequestLine(const std::string& line);
 	void _parseHeaderLine(const std::string& line);
+	void _validateHeaders();
 
 	bool _handleRequestLine();
 	bool _handleHeaders();

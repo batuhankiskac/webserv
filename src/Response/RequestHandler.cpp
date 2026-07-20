@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <arpa/inet.h>
 #include <vector>
 #include <string>
 
@@ -64,6 +65,42 @@ static std::string	_sizeToString(size_t n) {
 	return (ss.str());
 }
 
+static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
+	std::string relative = reqPath;
+	const std::string& prefix = loc.getPath();
+	if (relative.size() >= prefix.size() && relative.compare(0, prefix.size(), prefix) == 0)
+		relative = relative.substr(prefix.size());
+	if (relative.empty()) relative = "/";
+	if (relative[0] != '/') relative = "/" + relative;
+	return loc.getRoot() + relative;
+}
+
+static bool	_hasParentTraversal(const std::string& path) {
+	std::stringstream	ss(path);
+	std::string	part;
+
+	while (std::getline(ss, part, '/')) {
+		if (part == "..")
+			return true;
+	}
+	return false;
+}
+
+static std::string	_htmlEscape(const std::string& value) {
+	std::string out;
+	for (size_t i = 0; i < value.size(); ++i) {
+		switch (value[i]) {
+			case '&': out += "&amp;"; break;
+			case '<': out += "&lt;"; break;
+			case '>': out += "&gt;"; break;
+			case '"': out += "&quot;"; break;
+			case '\'': out += "&#39;"; break;
+			default: out += value[i];
+		}
+	}
+	return out;
+}
+
 std::string	RequestHandler::_extractHost(const Client& client) {
 	std::string	host = client.request.getHeader("host");
 	if (host.empty())
@@ -102,7 +139,9 @@ const LocationBlock*	RequestHandler::_selectLocationBlock(const ServerBlock& ser
 
 	for (size_t i = 0; i < locations.size(); ++i) {
 		const std::string&	locPath = locations[i].getPath();
-		if (path.size() >= locPath.size() && path.compare(0, locPath.size(), locPath) == 0) {
+		bool boundary = locPath == "/" || path.size() == locPath.size() ||
+			(path.size() > locPath.size() && path[locPath.size()] == '/');
+		if (boundary && path.compare(0, locPath.size(), locPath) == 0) {
 			if (locPath.size() > bestLen) {
 				best = &locations[i];
 				bestLen = locPath.size();
@@ -114,6 +153,7 @@ const LocationBlock*	RequestHandler::_selectLocationBlock(const ServerBlock& ser
 
 void	RequestHandler::_serveError(Client& client, int code, const ServerBlock& server) {
 	Response	resp = Response::error(code, server);
+	resp.setHttpVersion(client.request.getHttpVersion());
 	client.response = resp.serialize();
 }
 
@@ -124,19 +164,12 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 		return;
 	}
 
-	if (reqPath.find("..") != std::string::npos) {
-		_serveError(client, HTTP_FORBIDDEN, server);
-		return;
-	}
-
-	std::string	filePath = root + reqPath;
-
+	std::string filePath = _joinLocationPath(loc, reqPath);
 	struct stat	st;
 	if (stat(filePath.c_str(), &st) != 0) {
 		_serveError(client, HTTP_NOT_FOUND, server);
 		return;
 	}
-
 	if (S_ISDIR(st.st_mode)) {
 		const std::vector<std::string>&	index = loc.getIndex();
 		bool	found = false;
@@ -159,7 +192,8 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 				return;
 			}
 			std::string	html = _generateAutoindex(filePath, reqPath);
-			Response	resp;
+				Response	resp;
+				resp.setHttpVersion(client.request.getHttpVersion());
 			resp.setStatus(HTTP_OK);
 			resp.setBody(html);
 			resp.addHeader("Content-Type", "text/html");
@@ -188,6 +222,7 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 	}
 
 	Response	resp;
+	resp.setHttpVersion(client.request.getHttpVersion());
 	resp.setStatus(HTTP_OK);
 	resp.setBody(body);
 	resp.addHeader("Content-Type", _lookupMimeType(filePath));
@@ -220,12 +255,13 @@ std::string	RequestHandler::_generateAutoindex(const std::string& filePath, cons
 			fullPath += name;
 			struct stat	entrySt;
 			bool	isDir = false;
-			if (stat(fullPath.c_str(), &entrySt) == 0 && S_ISDIR(entrySt.st_mode))
+			if (stat(fullPath.c_str(), &entrySt) == 0 && S_ISDIR(entrySt.st_mode)) {
 				isDir = true;
-			ss << "<a href=\"" << reqPath;
+			}
+			ss << "<a href=\"" << _htmlEscape(reqPath);
 			if (reqPath.empty() || reqPath[reqPath.size() - 1] != '/')
 				ss << "/";
-			ss << name << "\">" << name;
+			ss << _htmlEscape(name) << "\">" << _htmlEscape(name);
 			if (isDir)
 				ss << "/";
 			ss << "</a><br>\r\n";
@@ -244,33 +280,37 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 		const LocationBlock& loc, const std::string& reqPath,
 		std::vector<std::string>& envStorage) {
 	envStorage.push_back("GATEWAY_INTERFACE=CGI/1.1");
-	envStorage.push_back("SERVER_PROTOCOL=HTTP/1.1");
+	envStorage.push_back("SERVER_PROTOCOL=" + client.request.getHttpVersion());
 	envStorage.push_back("REQUEST_METHOD=" + client.request.getMethod());
 	envStorage.push_back("QUERY_STRING=" + client.request.getQueryString());
 	envStorage.push_back("SCRIPT_NAME=" + reqPath);
 	envStorage.push_back("PATH_INFO=" + reqPath);
 
-	std::string locPath = loc.getPath();
-	std::string relativePath;
-	if (reqPath.size() > locPath.size())
-		relativePath = reqPath.substr(locPath.size());
-	else
-		relativePath = "/";
-	envStorage.push_back("PATH_TRANSLATED=" + loc.getRoot() + relativePath);
+	envStorage.push_back("PATH_TRANSLATED=" + _joinLocationPath(loc, reqPath));
 
 	envStorage.push_back("SERVER_NAME=" + server.getIp());
 	envStorage.push_back("SERVER_PORT=" + _sizeToString(static_cast<size_t>(server.getPort())));
 
-	if (client.contentLength > 0) {
+	if (client.contentLength >= 0) {
 		envStorage.push_back("CONTENT_LENGTH=" + _sizeToString(static_cast<size_t>(client.contentLength)));
-		envStorage.push_back("CONTENT_TYPE=" + client.request.getHeader("Content-Type"));
-	} else {
+	}
+	std::string contentType = client.request.getHeader("Content-Type");
+	if (!contentType.empty())
+		envStorage.push_back("CONTENT_TYPE=" + contentType);
+	if (client.contentLength < 0) {
 		envStorage.push_back("CONTENT_LENGTH=0");
 	}
 
-	std::string cookie = client.request.getHeader("Cookie");
-	if (!cookie.empty())
-		envStorage.push_back("HTTP_COOKIE=" + cookie);
+	const std::map<std::string, std::string, CaseInsensitiveCompare>& headers = client.request.getHeaders();
+	for (std::map<std::string, std::string, CaseInsensitiveCompare>::const_iterator it = headers.begin(); it != headers.end(); ++it) {
+		std::string key = it->first;
+		for (size_t i = 0; i < key.size(); ++i) {
+			if (key[i] == '-') key[i] = '_';
+			else key[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(key[i])));
+		}
+		if (key != "CONTENT_LENGTH" && key != "CONTENT_TYPE")
+			envStorage.push_back("HTTP_" + key + "=" + it->second);
+	}
 
 	char** envp = new char*[envStorage.size() + 1];
 	for (std::size_t i = 0; i < envStorage.size(); ++i)
@@ -294,22 +334,31 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 	}
 
 	int stdinFd = -1;
-	if (client.requestBodyFd != -1) {
-		lseek(client.requestBodyFd, 0, SEEK_SET);
-		stdinFd = client.requestBodyFd;
-	} else if (!client.requestBody.empty()) {
+	if (!client.requestBody.empty()) {
 		std::stringstream ss;
-		ss << "/tmp/webserv_cgi_" << client.clientFd;
+		ss << "/tmp/webserv_cgi_" << client.clientFd << "_" << static_cast<long>(std::time(NULL));
 		std::string tmpPath = ss.str();
-		stdinFd = open(tmpPath.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
-		if (stdinFd == -1) {
+		int tempFd = open(tmpPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+		if (tempFd == -1) {
 			close(cgiOut[0]);
 			close(cgiOut[1]);
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
-		write(stdinFd, client.requestBody.c_str(), client.requestBody.size());
-		lseek(stdinFd, 0, SEEK_SET);
+		std::size_t written = 0;
+		while (written < client.requestBody.size()) {
+			ssize_t n = write(tempFd, client.requestBody.c_str() + written, client.requestBody.size() - written);
+			if (n <= 0) { close(tempFd); std::remove(tmpPath.c_str()); close(cgiOut[0]); close(cgiOut[1]); _serveError(client, HTTP_INTERNAL_SERVER_ERROR, server); return; }
+			written += static_cast<std::size_t>(n);
+		}
+		close(tempFd);
+		stdinFd = open(tmpPath.c_str(), O_RDONLY);
+		std::remove(tmpPath.c_str());
+		if (stdinFd == -1) {
+			close(cgiOut[0]); close(cgiOut[1]);
+			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+			return;
+		}
 	}
 
 	std::vector<std::string> envStorage;
@@ -336,13 +385,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		}
 		if (chdir(loc.getRoot().c_str()) == -1)
 			std::exit(1);
-		std::string locPath = loc.getPath();
-		std::string relativePath;
-		if (reqPath.size() > locPath.size())
-			relativePath = reqPath.substr(locPath.size());
-		else
-			relativePath = "/";
-		std::string physicalPath = loc.getRoot() + relativePath;
+		std::string physicalPath = _joinLocationPath(loc, reqPath);
 		std::string cgiPath = loc.getCgiPath();
 		char* argv[3];
 		argv[0] = const_cast<char*>(cgiPath.c_str());
@@ -379,8 +422,9 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 		return;
 	}
 
+	static unsigned long uploadCounter = 0;
 	std::stringstream	nameSS;
-	nameSS << "upload_" << time(NULL) << "_" << client.clientFd << ".dat";
+	nameSS << "upload_" << static_cast<unsigned long>(std::time(NULL)) << "_" << client.clientFd << "_" << ++uploadCounter << ".dat";
 	std::string	filename = nameSS.str();
 
 	std::string	targetPath = uploadStore;
@@ -389,27 +433,26 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 	targetPath += filename;
 
 	bool	written = false;
-	if (!client.requestBody.empty()) {
-		std::ofstream	out(targetPath.c_str(), std::ios::binary);
-		if (out.is_open()) {
+	std::ofstream out(targetPath.c_str(), std::ios::binary);
+	if (out.is_open()) {
+		if (!client.requestBody.empty()) {
 			out.write(client.requestBody.data(), static_cast<std::streamsize>(client.requestBody.size()));
-			out.close();
 			written = !out.bad();
-		}
 	} else if (client.requestBodyFd != -1) {
-		if (lseek(client.requestBodyFd, 0, SEEK_SET) == static_cast<off_t>(-1)) {
-			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
-			return;
+			int readFd = open(client.requestBodyPath.c_str(), O_RDONLY);
+			if (readFd != -1) {
+				char buf[4096];
+				ssize_t n;
+				written = true;
+				while ((n = read(readFd, buf, sizeof(buf))) > 0)
+					out.write(buf, static_cast<std::streamsize>(n));
+				close(readFd);
+				written = written && !out.bad();
+			}
+		} else {
+			written = true;
 		}
-		std::ofstream	out(targetPath.c_str(), std::ios::binary);
-		if (out.is_open()) {
-			char	buf[4096];
-			ssize_t	n;
-			while ((n = read(client.requestBodyFd, buf, sizeof(buf))) > 0)
-				out.write(buf, static_cast<std::streamsize>(n));
-			out.close();
-			written = !out.bad();
-		}
+		out.close();
 	}
 
 	if (!written) {
@@ -419,6 +462,7 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 
 	std::string	body = "Upload successful.\r\n";
 	Response	resp;
+	resp.setHttpVersion(client.request.getHttpVersion());
 	resp.setStatus(HTTP_CREATED);
 	resp.setBody(body);
 	resp.addHeader("Content-Type", "text/plain");
@@ -434,19 +478,12 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 		return;
 	}
 
-	if (reqPath.find("..") != std::string::npos) {
-		_serveError(client, HTTP_FORBIDDEN, server);
-		return;
-	}
-
-	std::string	filePath = root + reqPath;
-
+	std::string filePath = _joinLocationPath(loc, reqPath);
 	struct stat	st;
 	if (stat(filePath.c_str(), &st) != 0) {
 		_serveError(client, HTTP_NOT_FOUND, server);
 		return;
 	}
-
 	if (S_ISDIR(st.st_mode)) {
 		_serveError(client, HTTP_FORBIDDEN, server);
 		return;
@@ -462,6 +499,7 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 	}
 
 	Response	resp;
+	resp.setHttpVersion(client.request.getHttpVersion());
 	resp.setStatus(HTTP_NO_CONTENT);
 	resp.addHeader("Content-Length", "0");
 	resp.addHeader("Connection", "close");
@@ -478,9 +516,14 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		_serveError(client, HTTP_NOT_FOUND, server);
 		return;
 	}
+	if (_hasParentTraversal(reqPath)) {
+		_serveError(client, HTTP_FORBIDDEN, server);
+		return;
+	}
 
 	if (loc->getReturnCode() != 200) {
 		Response	resp;
+		resp.setHttpVersion(client.request.getHttpVersion());
 		resp.setStatus(loc->getReturnCode());
 		resp.addHeader("Location", loc->getReturnUrl());
 		resp.addHeader("Content-Length", "0");
@@ -497,6 +540,10 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 			methodOk = true;
 			break;
 		}
+	}
+	if (method != "GET" && method != "POST" && method != "DELETE") {
+		_serveError(client, HTTP_NOT_IMPLEMENTED, server);
+		return;
 	}
 	if (!methodOk) {
 		_serveError(client, HTTP_METHOD_NOT_ALLOWED, server);

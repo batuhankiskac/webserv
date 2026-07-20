@@ -1,4 +1,5 @@
 #include "File.hpp"
+#include <cstdio>
 
 File::File() : _errno(0) {}
 
@@ -28,6 +29,7 @@ int	File::getNewFileFd(int clientFd)
 	
 	if (fileFd != -1)
 	{
+		fcntl(fileFd, F_SETFD, FD_CLOEXEC);
 		fdMap[clientFd] = fileFd;
 		return (fileFd);
 	}
@@ -65,6 +67,11 @@ void	File::closeFile(int clientFd)
 	{
 		if (it->second != -1)
 			close(it->second);
+		std::string filename = path;
+		std::stringstream ss;
+		ss << clientFd;
+		filename += ss.str();
+		std::remove(filename.c_str());
 		fdMap.erase(it);
 	}
 }

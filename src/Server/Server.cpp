@@ -1,4 +1,5 @@
 #include "Server.hpp"
+#include <netdb.h>
 
 Server::Server(std::string ip, int port) : port(port)
 {
@@ -19,6 +20,7 @@ Server::Server(std::string ip, int port) : port(port)
 		close(socketFd);
 		throw Server::SocketCreationError();
 	}
+	fcntl(socketFd, F_SETFD, FD_CLOEXEC);
 
 	struct sockaddr_in socketAddress;
 	socketAddress.sin_family = AF_INET;
@@ -26,7 +28,22 @@ Server::Server(std::string ip, int port) : port(port)
 	if (ip.empty())
 		socketAddress.sin_addr.s_addr = INADDR_ANY;
 	else
-		socketAddress.sin_addr.s_addr = inet_addr(ip.c_str());
+	{
+		struct addrinfo hints;
+		struct addrinfo* result = NULL;
+		std::memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_flags = AI_NUMERICHOST;
+		if (getaddrinfo(ip.c_str(), NULL, &hints, &result) != 0 || result == NULL)
+		{
+			if (result != NULL) freeaddrinfo(result);
+			close(socketFd);
+			throw Server::SocketCreationError();
+		}
+		socketAddress.sin_addr = reinterpret_cast<struct sockaddr_in*>(result->ai_addr)->sin_addr;
+		freeaddrinfo(result);
+	}
 
 	if (bind(socketFd, (struct sockaddr*)&socketAddress, sizeof(socketAddress)) < 0)
 	{

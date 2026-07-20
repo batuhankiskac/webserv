@@ -16,6 +16,7 @@ private:
 	int _status;
 	std::map<std::string, std::string> _headers;
 	std::string _body;
+	std::string _httpVersion;
 
 	static const ErrorInfo* _lookupError(int code);
 	static std::string _defaultErrorHtml(int code);
@@ -28,6 +29,7 @@ public:
 	void setStatus(int code);
 	void addHeader(const std::string& k, const std::string& v);
 	void setBody(const std::string& b);
+	void setHttpVersion(const std::string& version);
 	const std::string& getBody() const;
 
 	std::string serialize() const;

@@ -27,16 +27,21 @@ static const ErrorInfo	g_errorTable[] = {
 	{ HTTP_VERSION_NOT_SUPPORTED,		"HTTP Version Not Supported",	"The HTTP version is not supported." }
 };
 
+static const ErrorInfo	g_badGateway = { HTTP_BAD_GATEWAY, "Bad Gateway", "The upstream service returned an invalid response." };
+static const ErrorInfo	g_gatewayTimeout = { HTTP_GATEWAY_TIMEOUT, "Gateway Timeout", "The upstream service did not respond in time." };
 static const std::size_t	g_errorTableSize = sizeof(g_errorTable) / sizeof(g_errorTable[0]);
 
-Response::Response() : _status(200) { }
+Response::Response() : _status(200), _httpVersion("HTTP/1.1") { }
 
 void Response::setStatus(int code) { _status = code; }
 void Response::addHeader(const std::string& k, const std::string& v) { _headers[k] = v; }
 void Response::setBody(const std::string& b) { _body = b; }
+void Response::setHttpVersion(const std::string& version) { if (version == "HTTP/1.0" || version == "HTTP/1.1") _httpVersion = version; }
 const std::string& Response::getBody() const { return _body; }
 
 const ErrorInfo* Response::_lookupError(int code) {
+	if (code == HTTP_BAD_GATEWAY) return &g_badGateway;
+	if (code == HTTP_GATEWAY_TIMEOUT) return &g_gatewayTimeout;
 	for (std::size_t i = 0; i < g_errorTableSize; ++i) {
 		if (g_errorTable[i].code == code)
 			return &g_errorTable[i];
@@ -98,7 +103,15 @@ Response Response::error(int code, const ServerBlock& server) {
 	const std::map<std::string, std::string>&	pages = server.getErrorPages();
 	std::map<std::string, std::string>::const_iterator	it = pages.find(codeStr);
 	if (it != pages.end())
+	{
 		ok = _readFileToString(it->second, body);
+		if (!ok && !it->second.empty() && it->second[0] == '/') {
+			const std::vector<LocationBlock>& locations = server.getLocations();
+			for (std::size_t i = 0; i < locations.size() && !ok; ++i)
+				if (locations[i].getPath() == "/" && !locations[i].getRoot().empty())
+					ok = _readFileToString(locations[i].getRoot() + it->second, body);
+		}
+	}
 
 	if (!ok)
 		body = _defaultErrorHtml(code);
@@ -115,7 +128,8 @@ std::string	Response::serialize() const {
 	const ErrorInfo*	e = _lookupError(_status);
 	std::string	out;
 
-	out += "HTTP/1.1 ";
+	out += _httpVersion;
+	out += " ";
 	out += _intToString(_status);
 	out += " ";
 	out += e->reason;
