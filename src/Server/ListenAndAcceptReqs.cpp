@@ -107,8 +107,35 @@ ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
 
 ListenAndAcceptReqs::~ListenAndAcceptReqs()
 {
-	clients.clear();
-	close(epollFd);
+	while (!clients.empty())
+	{
+		std::map<int, Client>::iterator	it = clients.begin();
+		const int	clientFd = it->first;
+
+		_releaseClientResources(it->second, true);
+		if (epollFd != -1)
+			epoll_ctl(epollFd, EPOLL_CTL_DEL, clientFd, NULL);
+		close(clientFd);
+		clients.erase(it);
+	}
+
+	while (!cgiReadFdToClientFd.empty())
+	{
+		const int	cgiFd = cgiReadFdToClientFd.begin()->first;
+		if (epollFd != -1)
+			epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+		close(cgiFd);
+		cgiReadFdToClientFd.erase(cgiReadFdToClientFd.begin());
+	}
+
+	while (waitpid(-1, NULL, WNOHANG) > 0)
+		;
+
+	if (epollFd != -1)
+	{
+		close(epollFd);
+		epollFd = -1;
+	}
 }
 
 ListenAndAcceptReqs::ListenOrAcceptionError::ListenOrAcceptionError()
@@ -119,31 +146,40 @@ const char* ListenAndAcceptReqs::ListenOrAcceptionError::what() const throw()
 	return (std::strerror(_errno));
 }
 
+void	ListenAndAcceptReqs::_releaseClientResources(Client& client, bool waitForCgi)
+{
+	if (client.cgiOutFd != -1)
+	{
+		if (epollFd != -1)
+			epoll_ctl(epollFd, EPOLL_CTL_DEL, client.cgiOutFd, NULL);
+		cgiReadFdToClientFd.erase(client.cgiOutFd);
+		close(client.cgiOutFd);
+		client.cgiOutFd = -1;
+	}
+
+	if (client.cgiPid > 0)
+	{
+		kill(client.cgiPid, SIGKILL);
+		if (waitForCgi)
+		{
+			while (waitpid(client.cgiPid, NULL, 0) == -1 && errno == EINTR)
+				;
+		}
+		else
+			waitpid(client.cgiPid, NULL, WNOHANG);
+		client.cgiPid = -1;
+	}
+
+	file.closeFile(client.clientFd);
+	client.requestBodyFd = -1;
+	client.cgiActive = false;
+}
+
 void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour)
 {
 	std::map<int, Client>::iterator	it = clients.find(fd);
 	if (it != clients.end())
-	{
-		Client&	client = it->second;
-		if (client.cgiOutFd != -1)
-		{
-			epoll_ctl(epollFd, EPOLL_CTL_DEL, client.cgiOutFd, NULL);
-			cgiReadFdToClientFd.erase(client.cgiOutFd);
-			close(client.cgiOutFd);
-			client.cgiOutFd = -1;
-		}
-		if (client.cgiPid > 0)
-		{
-			kill(client.cgiPid, SIGKILL);
-			waitpid(client.cgiPid, NULL, WNOHANG);
-			client.cgiPid = -1;
-		}
-		if (client.requestBodyFd != -1)
-		{
-			file.closeFile(client.clientFd);
-			client.requestBodyFd = -1;
-		}
-	}
+		_releaseClientResources(it->second, false);
 
 	epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, NULL);
 	close(fd);
@@ -254,7 +290,7 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 		cleanupClient(clientFd, fdTargetTour);
 }
 
-void	ListenAndAcceptReqs::waitReqs()
+void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequested)
 {
 	const int TICK_RATE = 1;
 	epollEvents.resize(BUFFER_SIZE);
@@ -264,7 +300,7 @@ void	ListenAndAcceptReqs::waitReqs()
 	std::map<int, int> fdTargetTour;
 	std::vector<std::vector<int> > timerWheel(MAX_TOUR);
 
-	while (true)
+	while (!shutdownRequested)
 	{
 		const time_t now = std::time(NULL);
 

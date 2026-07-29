@@ -3,7 +3,11 @@
 
 File::File() : _errno(0) {}
 
-File::~File() {}
+File::~File()
+{
+	while (!fdMap.empty())
+		closeFile(fdMap.begin()->first);
+}
 
 void	File::setPath(const std::string& path)
 {

@@ -9,18 +9,28 @@
 #include <utility>
 #include <csignal>
 
-int	main(int argc, char** argv)
-{
+static volatile sig_atomic_t	gShutdownRequested = 0;
+
+static void	handleShutdownSignal(int signal) {
+	(void)signal;
+	gShutdownRequested = 1;
+}
+
+int	main(int argc, char** argv) {
 	if (argc != 2) {
 		std::cerr << "Usage: " << argv[0] << " <configuration_file>" << std::endl;
 		return (1);
 	}
 
 	std::signal(SIGPIPE, SIG_IGN);
+	if (std::signal(SIGINT, handleShutdownSignal) == SIG_ERR
+		|| std::signal(SIGTERM, handleShutdownSignal) == SIG_ERR) {
+		std::cerr << "webserv: failed to install signal handler" << std::endl;
+		return (1);
+	}
 
 	std::vector<Server*>	servers;
 	File	file;
-	ListenAndAcceptReqs*	listener = NULL;
 
 	try {
 		WebservConfig	config(argv[1]);
@@ -46,18 +56,15 @@ int	main(int argc, char** argv)
 		if (servers.empty())
 			throw (std::runtime_error("No server sockets to listen"));
 
-		listener = new ListenAndAcceptReqs(servers, file, config);
-		listener->waitReqs();
+		ListenAndAcceptReqs	listener(servers, file, config);
+		listener.waitReqs(gShutdownRequested);
 	}
 	catch (const std::exception& e) {
 		std::cerr << "webserv: " << e.what() << std::endl;
-		delete listener;
 		for (std::size_t i = 0; i < servers.size(); ++i)
 			delete servers[i];
 		return (1);
 	}
-
-	delete listener;
 
 	for (std::size_t i = 0; i < servers.size(); ++i)
 		delete servers[i];

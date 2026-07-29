@@ -13,6 +13,7 @@
 #include <iostream>
 #include <map>
 #include <ctime>
+#include <csignal>
 
 #include "Client.hpp"
 #include "Request.hpp"
@@ -29,7 +30,7 @@ class ListenAndAcceptReqs
 	public:
 		ListenAndAcceptReqs(const std::vector<Server*>& servers, File& file, const WebservConfig& config);
 		~ListenAndAcceptReqs();
-		void	waitReqs();
+		void	waitReqs(const volatile sig_atomic_t& shutdownRequested);
 
 	private:
 		int	epollFd;
@@ -43,6 +44,7 @@ class ListenAndAcceptReqs
 		const WebservConfig& config;
 
 		size_t	_getMaxBodySize(int port) const;
+		void	_releaseClientResources(Client& client, bool waitForCgi);
 		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
 		bool	_sendErrorAndMod(int fd, Client& client, int code);
 		void	_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour);
