@@ -66,13 +66,14 @@ static std::string	_sizeToString(size_t n) {
 }
 
 static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
-	std::string relative = reqPath;
-	const std::string& prefix = loc.getPath();
-	if (relative.size() >= prefix.size() && relative.compare(0, prefix.size(), prefix) == 0)
-		relative = relative.substr(prefix.size());
-	if (relative.empty()) relative = "/";
-	if (relative[0] != '/') relative = "/" + relative;
-	return loc.getRoot() + relative;
+	std::string	root = loc.getRoot();
+	if (!root.empty() && root[root.size() - 1] == '/' &&
+		!reqPath.empty() && reqPath[0] == '/')
+		root.erase(root.size() - 1);
+	else if (!root.empty() && root[root.size() - 1] != '/' &&
+		!reqPath.empty() && reqPath[0] != '/')
+		root += '/';
+	return root + reqPath;
 }
 
 static bool	_hasParentTraversal(const std::string& path) {
@@ -101,6 +102,13 @@ static std::string	_htmlEscape(const std::string& value) {
 	return out;
 }
 
+static std::string	_toLowerAscii(std::string value) {
+	for (size_t i = 0; i < value.size(); ++i)
+		value[i] = static_cast<char>(
+			std::tolower(static_cast<unsigned char>(value[i])));
+	return value;
+}
+
 std::string	RequestHandler::_extractHost(const Client& client) {
 	std::string	host = client.request.getHeader("host");
 	if (host.empty())
@@ -108,7 +116,7 @@ std::string	RequestHandler::_extractHost(const Client& client) {
 	size_t	colon = host.find(':');
 	if (colon != std::string::npos)
 		host = host.substr(0, colon);
-	return (host);
+	return (_toLowerAscii(host));
 }
 
 const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& config, int port, const std::string& host) {
@@ -122,7 +130,7 @@ const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& confi
 			firstMatch = &servers[i];
 		const std::vector<std::string>&	names = servers[i].getServerNames();
 		for (size_t j = 0; j < names.size(); ++j) {
-			if (names[j] == host)
+			if (_toLowerAscii(names[j]) == host)
 				return (servers[i]);
 		}
 	}
@@ -258,10 +266,8 @@ std::string	RequestHandler::_generateAutoindex(const std::string& filePath, cons
 			if (stat(fullPath.c_str(), &entrySt) == 0 && S_ISDIR(entrySt.st_mode)) {
 				isDir = true;
 			}
-			ss << "<a href=\"" << _htmlEscape(reqPath);
-			if (reqPath.empty() || reqPath[reqPath.size() - 1] != '/')
-				ss << "/";
-			ss << _htmlEscape(name) << "\">" << _htmlEscape(name);
+			ss << "<a href=\"" << _htmlEscape(name) << "\">"
+				<< _htmlEscape(name);
 			if (isDir)
 				ss << "/";
 			ss << "</a><br>\r\n";
@@ -284,9 +290,11 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 	envStorage.push_back("REQUEST_METHOD=" + client.request.getMethod());
 	envStorage.push_back("QUERY_STRING=" + client.request.getQueryString());
 	envStorage.push_back("SCRIPT_NAME=" + reqPath);
+	envStorage.push_back("SCRIPT_FILENAME=" + _joinLocationPath(loc, reqPath));
 	envStorage.push_back("PATH_INFO=" + reqPath);
 
 	envStorage.push_back("PATH_TRANSLATED=" + _joinLocationPath(loc, reqPath));
+	envStorage.push_back("REDIRECT_STATUS=200");
 
 	envStorage.push_back("SERVER_NAME=" + server.getIp());
 	envStorage.push_back("SERVER_PORT=" + _sizeToString(static_cast<size_t>(server.getPort())));

@@ -1,60 +1,36 @@
-// Webserv Test JavaScript
-console.log('Webserv test page loaded');
-
-// Test HTTP methods
 async function testMethod(method) {
-    const resultEl = document.getElementById('method-result');
-    resultEl.textContent = `Testing ${method}...\n`;
-    
+    const result = document.getElementById('method-result');
+    result.textContent = `Testing ${method}…`;
+
     try {
-        const response = await fetch('/', {
-            method: method,
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-        });
-        const text = await response.text();
-        resultEl.textContent += `${method}: ${response.status} ${response.statusText}\n`;
-        if (text.length > 200) {
-            resultEl.textContent += text.substring(0, 200) + '...';
-        } else {
-            resultEl.textContent += text;
-        }
-    } catch (err) {
-        resultEl.textContent += `${method}: Error - ${err.message}`;
+        const response = await fetch('/', { method });
+        const body = await response.text();
+        result.textContent = `${method}: ${response.status} ${response.statusText}\n${body.slice(0, 300)}`;
+    } catch (error) {
+        result.textContent = `${method}: ${error.message}`;
     }
 }
 
-// DELETE file upload
-document.getElementById('delete-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const filename = document.getElementById('delete-filename').value.trim();
-    const resultEl = document.getElementById('delete-result');
-    
-    if (!filename) return;
-    
-    resultEl.innerHTML = 'Deleting...';
-    
-    try {
-        const response = await fetch(`/upload/${filename}`, {
-            method: 'DELETE'
-        });
-        resultEl.innerHTML = `DELETE ${filename}: ${response.status} ${response.statusText}`;
-    } catch (err) {
-        resultEl.innerHTML = `Error: ${err.message}`;
-    }
+document.querySelectorAll('[data-method]').forEach((button) => {
+    button.addEventListener('click', () => testMethod(button.dataset.method));
 });
 
-// Auto-refresh upload directory after upload
-const uploadForms = document.querySelectorAll('form[action="/upload"], form[action="/small-upload"]');
-uploadForms.forEach(form => {
-    form.addEventListener('submit', () => {
-        setTimeout(() => {
-            fetch('/upload/')
-                .then(r => r.text())
-                .then(html => {
-                    console.log('Upload directory refreshed');
-                });
-        }, 500);
-    });
+const deleteForm = document.getElementById('delete-form');
+deleteForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const filename = document.getElementById('delete-filename').value.trim();
+    const result = document.getElementById('delete-result');
+    if (!filename) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/upload/${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+        });
+        result.textContent = `DELETE ${filename}: ${response.status} ${response.statusText}`;
+    } catch (error) {
+        result.textContent = `DELETE ${filename}: ${error.message}`;
+    }
 });

@@ -1,0 +1,1 @@
+This filename verifies HTML escaping in autoindex output.
