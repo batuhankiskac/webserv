@@ -550,8 +550,11 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		return;
 	}
 
+	const size_t	maxBodySize = loc->hasClientMaxBodySize()
+		? loc->getClientMaxBodySize() : server.getClientMaxBodySize();
 	long long	contentLen = client.contentLength;
-	if (contentLen > 0 && static_cast<size_t>(contentLen) > server.getClientMaxBodySize()) {
+	if (maxBodySize != 0 && contentLen > 0
+		&& static_cast<size_t>(contentLen) > maxBodySize) {
 		_serveError(client, HTTP_PAYLOAD_TOO_LARGE, server);
 		return;
 	}

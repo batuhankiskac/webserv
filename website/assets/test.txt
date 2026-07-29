@@ -1,0 +1,2 @@
+Asset test file - served from /assets location
+This file tests static file serving with correct MIME types.

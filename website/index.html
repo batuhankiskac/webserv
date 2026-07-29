@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webserv Test Page</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Webserv is Working! 🎉</h1>
+        <p class="subtitle">C++ HTTP Server - All Systems Go</p>
+        
+        <div class="card">
+            <h2>Quick Tests</h2>
+            <ul>
+                <li><a href="/style.css">Static CSS</a></li>
+                <li><a href="/script.js">Static JS</a></li>
+                <li><a href="/assets/test.txt">Asset File</a></li>
+                <li><a href="/autoindex/">Autoindex Directory</a></li>
+                <li><a href="/upload/">Upload Directory</a></li>
+                <li><a href="/cgi-bin/test.php">PHP CGI Test</a></li>
+                <li><a href="/redirect-me">Redirect (301)</a></li>
+                <li><a href="/get-only/page.html">GET-only Location</a></li>
+                <li><a href="/nonexistent">404 Test</a></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>POST Upload Test</h2>
+            <form action="/upload" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file" required>
+                <button type="submit">Upload File</button>
+            </form>
+            <p class="note">Files are saved with auto-generated names. Check <a href="/upload/">upload directory</a> after upload.</p>
+        </div>
+
+        <div class="card">
+            <h2>DELETE Test</h2>
+            <p>Upload a file first, then delete it:</p>
+            <form id="delete-form">
+                <input type="text" id="delete-filename" placeholder="filename.dat" required>
+                <button type="submit">DELETE</button>
+            </form>
+            <div id="delete-result"></div>
+        </div>
+
+        <div class="card">
+            <h2>Large Body Test (413)</h2>
+            <form action="/small-upload" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file" required>
+                <button type="submit">Upload (max 1KB)</button>
+            </form>
+            <p class="note">Files > 1KB should return 413 Payload Too Large</p>
+        </div>
+
+        <div class="card">
+            <h2>Method Tests</h2>
+            <button onclick="testMethod('GET')">GET</button>
+            <button onclick="testMethod('POST')">POST</button>
+            <button onclick="testMethod('DELETE')">DELETE</button>
+            <button onclick="testMethod('PUT')">PUT (501)</button>
+            <button onclick="testMethod('PATCH')">PATCH (501)</button>
+            <pre id="method-result"></pre>
+        </div>
+
+        <div class="card">
+            <h2>Second Server (Port 9090)</h2>
+            <p><a href="http://127.0.0.1:9090/" target="_blank">http://127.0.0.1:9090/</a></p>
+            <p class="note">Different server block, same root directory</p>
+        </div>
+    </div>
+
+    <script src="/script.js"></script>
+</body>
+</html>

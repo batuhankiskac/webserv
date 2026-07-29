@@ -60,11 +60,28 @@ static std::string	buildCgiHttpResponse(const std::string& cgiOutput) {
 size_t	ListenAndAcceptReqs::_getMaxBodySize(int port) const
 {
 	const std::vector<ServerBlock>&	servers = config.getServers();
+	size_t	maxBodySize = 0;
 	for (std::size_t i = 0; i < servers.size(); ++i)
 	{
-		if (servers[i].getPort() == port)
-			return (servers[i].getClientMaxBodySize());
+		if (servers[i].getPort() != port)
+			continue;
+		if (servers[i].getClientMaxBodySize() == 0)
+			return (static_cast<size_t>(-1));
+		if (servers[i].getClientMaxBodySize() > maxBodySize)
+			maxBodySize = servers[i].getClientMaxBodySize();
+		const std::vector<LocationBlock>& locations = servers[i].getLocations();
+		for (std::size_t j = 0; j < locations.size(); ++j)
+		{
+			if (!locations[j].hasClientMaxBodySize())
+				continue;
+			if (locations[j].getClientMaxBodySize() == 0)
+				return (static_cast<size_t>(-1));
+			if (locations[j].getClientMaxBodySize() > maxBodySize)
+				maxBodySize = locations[j].getClientMaxBodySize();
+		}
 	}
+	if (maxBodySize != 0)
+		return (maxBodySize);
 	return (servers[0].getClientMaxBodySize());
 }
 

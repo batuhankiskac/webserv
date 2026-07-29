@@ -1,8 +1,10 @@
 #include "LocationBlock.hpp"
+#include <cctype>
 #include <sstream>
 #include <stdexcept>
 
-LocationBlock::LocationBlock(const std::string& path) : _path(path), _uploadEnable(false), _autoIndex(false), _returnCode(200) {
+LocationBlock::LocationBlock(const std::string& path) : _path(path), _clientMaxBodySize(0),
+	_hasClientMaxBodySize(false), _uploadEnable(false), _autoIndex(false), _returnCode(200) {
 }
 
 void LocationBlock::parseLocationBlock(const std::vector<std::string>& tokens, size_t& i) {
@@ -23,6 +25,7 @@ void LocationBlock::parseLocationBlock(const std::vector<std::string>& tokens, s
 		else if (tok == "index")          _parseIndex(tokens, i);
 		else if (tok == "allow_methods")  _parseAllowMethods(tokens, i);
 		else if (tok == "return")         _parseReturn(tokens, i);
+		else if (tok == "client_max_body_size") _parseClientMaxBodySize(tokens, i);
 		else throw std::runtime_error("Invalid token: " + tok);
 	}
 
@@ -30,6 +33,53 @@ void LocationBlock::parseLocationBlock(const std::vector<std::string>& tokens, s
 		throw std::runtime_error("Invalid location block");
 	}
 	i++;
+}
+
+void LocationBlock::_parseClientMaxBodySize(const std::vector<std::string>& tokens, size_t& i) {
+	i++;
+	if (i >= tokens.size() || tokens[i] == ";") {
+		throw std::runtime_error("Invalid client_max_body_size directive");
+	}
+
+	const std::string	value = tokens[i++];
+	std::string			number = value;
+	size_t				multiplier = 1;
+	const char			unit = value.empty() ? '\0' : value[value.size() - 1];
+
+	if (unit == 'k' || unit == 'K') {
+		multiplier = 1024;
+		number = value.substr(0, value.size() - 1);
+	} else if (unit == 'm' || unit == 'M') {
+		multiplier = 1024 * 1024;
+		number = value.substr(0, value.size() - 1);
+	} else if (unit == 'g' || unit == 'G') {
+		multiplier = 1024 * 1024 * 1024;
+		number = value.substr(0, value.size() - 1);
+	} else if (!std::isdigit(static_cast<unsigned char>(unit))) {
+		throw std::runtime_error("Invalid client_max_body_size directive");
+	}
+
+	if (number.empty()) {
+		throw std::runtime_error("Invalid client_max_body_size directive");
+	}
+	for (size_t j = 0; j < number.size(); ++j) {
+		if (!std::isdigit(static_cast<unsigned char>(number[j]))) {
+			throw std::runtime_error("Invalid client_max_body_size directive");
+		}
+	}
+
+	std::stringstream	ss(number);
+	size_t				size = 0;
+	ss >> size;
+	if (ss.fail() || !ss.eof() || size > static_cast<size_t>(-1) / multiplier) {
+		throw std::runtime_error("Invalid client_max_body_size directive");
+	}
+	if (i >= tokens.size() || tokens[i] != ";") {
+		throw std::runtime_error("Invalid client_max_body_size directive");
+	}
+	i++;
+	_clientMaxBodySize = size * multiplier;
+	_hasClientMaxBodySize = true;
 }
 
 void LocationBlock::_parseSingleValue(const std::vector<std::string>& tokens, size_t& i,
@@ -145,6 +195,14 @@ const std::string& LocationBlock::getCgiExt() const {
 
 const std::string& LocationBlock::getReturnUrl() const {
 	return _returnUrl;
+}
+
+size_t LocationBlock::getClientMaxBodySize() const {
+	return _clientMaxBodySize;
+}
+
+bool LocationBlock::hasClientMaxBodySize() const {
+	return _hasClientMaxBodySize;
 }
 
 int LocationBlock::getReturnCode() const {

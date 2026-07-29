@@ -14,6 +14,8 @@ private:
 	std::string _cgiPath;
 	std::string _cgiExt;
 	std::string _returnUrl;
+	size_t _clientMaxBodySize;
+	bool _hasClientMaxBodySize;
 	bool _uploadEnable;
 	bool _autoIndex;
 	int _returnCode;
@@ -24,6 +26,7 @@ private:
 	void _parseIndex(const std::vector<std::string>& tokens, size_t& i);
 	void _parseAllowMethods(const std::vector<std::string>& tokens, size_t& i);
 	void _parseReturn(const std::vector<std::string>& tokens, size_t& i);
+	void _parseClientMaxBodySize(const std::vector<std::string>& tokens, size_t& i);
 
 public:
 	LocationBlock(const std::string& path);
@@ -38,6 +41,8 @@ public:
 	const std::string& getCgiPath() const;
 	const std::string& getCgiExt() const;
 	const std::string& getReturnUrl() const;
+	size_t getClientMaxBodySize() const;
+	bool hasClientMaxBodySize() const;
 	int getReturnCode() const;
 	bool getUploadEnable() const;
 	bool getAutoIndex() const;
