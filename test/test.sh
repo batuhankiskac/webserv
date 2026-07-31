@@ -265,6 +265,7 @@ section "Server startup"
 if [ "$LEAK_MODE" = "1" ] && command -v valgrind >/dev/null 2>&1; then
     echo "  Valgrind enabled (children traced into per-process logs)"
     valgrind --leak-check=full --show-leak-kinds=all \
+        --track-origins=yes \
         --track-fds=yes --trace-children=yes \
         --log-file="${TEST_TMP}/valgrind.%p.log" \
         "$SERVER_BIN" "$CONFIG" >"$SERVER_LOG" 2>&1 &
@@ -621,43 +622,59 @@ echo "  Failed: $FAIL"
 section "Graceful shutdown"
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
-APP_VALGRIND_LOG="${TEST_TMP}/valgrind.${SERVER_PID}.log"
 SERVER_PID=""
 pass "Server exits after SIGTERM"
 
-if [ "$LEAK_MODE" = "1" ] && [ -f "$APP_VALGRIND_LOG" ]; then
-    section "Valgrind: webserv process"
-    DEFINITELY_LOST="$(grep 'definitely lost:' "$APP_VALGRIND_LOG" | tail -1 || true)"
-    INDIRECTLY_LOST="$(grep 'indirectly lost:' "$APP_VALGRIND_LOG" | tail -1 || true)"
-    POSSIBLY_LOST="$(grep 'possibly lost:' "$APP_VALGRIND_LOG" | tail -1 || true)"
-    ERROR_SUMMARY="$(grep 'ERROR SUMMARY:' "$APP_VALGRIND_LOG" | tail -1 || true)"
-    FD_OPEN="$(grep 'FILE DESCRIPTORS:' "$APP_VALGRIND_LOG" | tail -1 | grep -oE '[0-9]+ open' | grep -oE '[0-9]+' || true)"
+if [ "$LEAK_MODE" = "1" ]; then
+    VALGRIND_LOG_COUNT=0
+    VALGRIND_BAD_LEAKS=0
+    VALGRIND_BAD_ERRORS=0
+    VALGRIND_BAD_FDS=0
 
-    if grep -q 'All heap blocks were freed -- no leaks are possible' "$APP_VALGRIND_LOG" \
-        || { [[ "$DEFINITELY_LOST" =~ definitely\ lost:\ 0\ bytes ]] \
-            && [[ "$INDIRECTLY_LOST" =~ indirectly\ lost:\ 0\ bytes ]] \
-            && [[ "$POSSIBLY_LOST" =~ possibly\ lost:\ 0\ bytes ]]; }; then
-        pass "No definite, indirect or possible memory leaks"
-    else
-        fail "Valgrind leak summary is not clean"
-        printf '%s\n%s\n%s\n' "$DEFINITELY_LOST" "$INDIRECTLY_LOST" "$POSSIBLY_LOST"
-    fi
+    section "Valgrind: all traced processes"
+    for valgrind_log in "${TEST_TMP}"/valgrind.*.log; do
+        [ -f "$valgrind_log" ] || continue
+        VALGRIND_LOG_COUNT=$((VALGRIND_LOG_COUNT + 1))
+        echo ""
+        echo "--- $(basename "$valgrind_log") ---"
+        # Keep the complete report in the main test output, including the
+        # allocation stack traces printed by --leak-check=full.
+        sed -n '/HEAP SUMMARY:/,$p' "$valgrind_log"
 
-    if [[ "$ERROR_SUMMARY" =~ ERROR\ SUMMARY:\ 0\ errors ]]; then
-        pass "Valgrind reports zero memory errors"
-    else
-        fail "Valgrind reports errors"
-        printf '%s\n' "$ERROR_SUMMARY"
-    fi
+        DEFINITELY_LOST="$(grep 'definitely lost:' "$valgrind_log" | tail -1 || true)"
+        INDIRECTLY_LOST="$(grep 'indirectly lost:' "$valgrind_log" | tail -1 || true)"
+        POSSIBLY_LOST="$(grep 'possibly lost:' "$valgrind_log" | tail -1 || true)"
+        ERROR_SUMMARY="$(grep 'ERROR SUMMARY:' "$valgrind_log" | tail -1 || true)"
+        FD_OPEN="$(grep 'FILE DESCRIPTORS:' "$valgrind_log" | tail -1 \
+            | grep -oE '[0-9]+ open' | grep -oE '[0-9]+' || true)"
 
-    if [ -n "$FD_OPEN" ] && [ "$FD_OPEN" -le 4 ]; then
-        pass "No application file-descriptor leak"
+        if ! grep -q 'All heap blocks were freed -- no leaks are possible' "$valgrind_log" \
+            && ! { [[ "$DEFINITELY_LOST" =~ definitely\ lost:\ 0\ bytes ]] \
+                && [[ "$INDIRECTLY_LOST" =~ indirectly\ lost:\ 0\ bytes ]] \
+                && [[ "$POSSIBLY_LOST" =~ possibly\ lost:\ 0\ bytes ]]; }; then
+            VALGRIND_BAD_LEAKS=1
+        fi
+        if [ -n "$ERROR_SUMMARY" ] && ! [[ "$ERROR_SUMMARY" =~ ERROR\ SUMMARY:\ 0\ errors ]]; then
+            VALGRIND_BAD_ERRORS=1
+        fi
+        if [ -n "$FD_OPEN" ] && [ "$FD_OPEN" -gt 4 ]; then
+            VALGRIND_BAD_FDS=1
+        fi
+    done
+
+    if [ "$VALGRIND_LOG_COUNT" -eq 0 ]; then
+        fail "No Valgrind logs were produced"
     else
-        fail "Unexpected open file descriptors at exit (open: ${FD_OPEN:-unknown})"
-        grep -A8 'FILE DESCRIPTORS:' "$APP_VALGRIND_LOG" || true
+        [ "$VALGRIND_BAD_LEAKS" -eq 0 ] \
+            && pass "No definite, indirect or possible memory leaks in traced processes" \
+            || fail "Valgrind leak summary is not clean in one or more traced processes"
+        [ "$VALGRIND_BAD_ERRORS" -eq 0 ] \
+            && pass "Valgrind reports zero memory errors in traced processes" \
+            || fail "Valgrind reports errors in one or more traced processes"
+        [ "$VALGRIND_BAD_FDS" -eq 0 ] \
+            && pass "No application file-descriptor leak in traced processes" \
+            || fail "Unexpected open file descriptors in one or more traced processes"
     fi
-elif [ "$LEAK_MODE" = "1" ]; then
-    fail "Valgrind log for the webserv process was not produced"
 fi
 
 echo ""
