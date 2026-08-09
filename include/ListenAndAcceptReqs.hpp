@@ -37,6 +37,7 @@ class ListenAndAcceptReqs
 		std::map<int, int> listenFdToPort;
 		std::vector<struct epoll_event> epollEvents;
 		std::map<int, Client> clients;
+		std::map<int, time_t> blockedListeners;
 
 		std::map<int, int> cgiReadFdToClientFd;
 

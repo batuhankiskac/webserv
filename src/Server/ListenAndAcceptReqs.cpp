@@ -321,6 +321,23 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 	{
 		const time_t now = std::time(NULL);
 
+		for (std::map<int, time_t>::iterator bit = blockedListeners.begin(); bit != blockedListeners.end(); )
+		{
+			if (now < bit->second)
+			{
+				++bit;
+				continue;
+			}
+
+			struct epoll_event enableEvent;
+			enableEvent.events = EPOLLIN;
+			enableEvent.data.fd = bit->first;
+			if (epoll_ctl(epollFd, EPOLL_CTL_MOD, bit->first, &enableEvent) != -1)
+				blockedListeners.erase(bit++);
+			else
+				++bit;
+		}
+
 		while (now - lastTick >= TICK_RATE)
 		{
 			lastTick += TICK_RATE;
@@ -375,7 +392,15 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					int	clientSocket = accept(currentFd, NULL, NULL);
 					if (clientSocket == -1)
 					{
-						std::cerr << "One connecttion cannot accept."
+						if (errno == EMFILE || errno == ENFILE)
+						{
+							struct epoll_event disableEvent;
+							disableEvent.events = 0;
+							disableEvent.data.fd = currentFd;
+							epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd, &disableEvent);
+							blockedListeners[currentFd] = now + 1;
+						}
+						std::cerr << "One connection cannot accept."
 							<< std::endl;
 						continue ;
 					}
