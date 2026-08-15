@@ -65,6 +65,28 @@ static std::string	_sizeToString(size_t n) {
 	return (ss.str());
 }
 
+static std::string	_buildAllowHeaderValue(const std::vector<std::string>& allowed) {
+	if (allowed.empty())
+		return ("GET");
+
+	std::string	out;
+	for (size_t i = 0; i < allowed.size(); ++i) {
+		bool	seen = false;
+		for (size_t j = 0; j < i; ++j) {
+			if (allowed[j] == allowed[i]) {
+				seen = true;
+				break;
+			}
+		}
+		if (seen)
+			continue;
+		if (!out.empty())
+			out += ", ";
+		out += allowed[i];
+	}
+	return (out);
+}
+
 static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
 	std::string	root = loc.getRoot();
 	if (!root.empty() && root[root.size() - 1] == '/' &&
@@ -554,7 +576,10 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		return;
 	}
 	if (!methodOk) {
-		_serveError(client, HTTP_METHOD_NOT_ALLOWED, server);
+		Response	resp = Response::error(HTTP_METHOD_NOT_ALLOWED, server);
+		resp.setHttpVersion(client.request.getHttpVersion());
+		resp.addHeader("Allow", _buildAllowHeaderValue(allowed));
+		client.response = resp.serialize();
 		return;
 	}
 
