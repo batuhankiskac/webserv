@@ -87,6 +87,21 @@ static std::string	_buildAllowHeaderValue(const std::vector<std::string>& allowe
 	return (out);
 }
 
+static bool	_isImplementedMethod(const std::string& method) {
+	return (method == "GET" || method == "POST" || method == "DELETE");
+}
+
+static bool	_isKnownHttpMethodForVersion(const std::string& method, const std::string& httpVersion) {
+	if (httpVersion == "HTTP/1.0") {
+		return (method == "GET" || method == "HEAD" || method == "POST");
+	}
+	return (
+		method == "GET" || method == "HEAD" || method == "POST" ||
+		method == "PUT" || method == "DELETE" || method == "CONNECT" ||
+		method == "OPTIONS" || method == "TRACE" || method == "PATCH"
+	);
+}
+
 static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
 	std::string	root = loc.getRoot();
 	if (!root.empty() && root[root.size() - 1] == '/' &&
@@ -563,6 +578,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 	}
 
 	const std::string&	method = client.request.getMethod();
+	const std::string&	httpVersion = client.request.getHttpVersion();
 	const std::vector<std::string>&	allowed = loc->getAllowMethods();
 	bool	methodOk = false;
 	for (size_t i = 0; i < allowed.size(); ++i) {
@@ -571,13 +587,15 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 			break;
 		}
 	}
-	if (method != "GET" && method != "POST" && method != "DELETE") {
+	const bool	isImplemented = _isImplementedMethod(method);
+	const bool	isKnownForVersion = _isKnownHttpMethodForVersion(method, httpVersion);
+	if (!isImplemented && !isKnownForVersion) {
 		_serveError(client, HTTP_NOT_IMPLEMENTED, server);
 		return;
 	}
-	if (!methodOk) {
+	if (!isImplemented || !methodOk) {
 		Response	resp = Response::error(HTTP_METHOD_NOT_ALLOWED, server);
-		resp.setHttpVersion(client.request.getHttpVersion());
+		resp.setHttpVersion(httpVersion);
 		resp.addHeader("Allow", _buildAllowHeaderValue(allowed));
 		client.response = resp.serialize();
 		return;
