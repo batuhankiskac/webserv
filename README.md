@@ -1,78 +1,131 @@
-# webserv
+*This project has been created as part of the 42 curriculum by bkiskac, raydogmu.*
 
-C++98 ile yazılmış, `epoll` tabanlı HTTP/1.0 ve HTTP/1.1 sunucusu.
+# Webserv
 
-## Derleme
+## Description
 
-```sh
+Webserv is an HTTP server written in **C++98**.
+
+The purpose of the project is to understand what happens behind a web server by building one from scratch. It handles socket connections, parses HTTP requests, creates responses, and manages clients using non-blocking I/O.
+
+We use `epoll` to handle multiple connections at the same time. The server supports both HTTP/1.0 and HTTP/1.1.
+
+Main features:
+
+* GET, POST and DELETE methods
+* Static file serving
+* File uploads
+* CGI execution
+* HTTP redirects
+* Custom error pages
+* Autoindex
+* Multiple ports and server configurations
+
+## Instructions
+
+### Requirements
+
+Webserv is written in **C++98** and relies on Linux networking APIs such as `epoll`.
+
+Because of this, the project needs to be compiled and run on Linux.
+
+Useful tools:
+
+* `c++` for compilation
+* `make` for building the project
+* `curl` for sending HTTP requests
+* `php-cgi` for CGI testing
+* `valgrind` for optional memory checks
+
+### Compilation
+
+Clone the repository and enter the project directory:
+
+```bash
+git clone https://github.com/batuhankiskac/webserv.git
+cd webserv
+```
+
+Compile the project with:
+
+```bash
 make
 ```
 
-Proje Linux ağ API’lerini (`epoll`) kullandığı için Linux ortamında derlenmelidir.
+The Makefile uses the following flags:
 
-## Çalıştırma
+```text
+-Wall -Wextra -Werror -std=c++98
+```
 
-```sh
+Other available Makefile commands are:
+
+```bash
+make clean
+make fclean
+make re
+```
+
+* `clean` removes the object files.
+* `fclean` removes the object files and the executable.
+* `re` rebuilds the project from scratch.
+
+### Execution
+
+Start the server by giving it a configuration file:
+
+```bash
 ./webserv config/example.conf
 ```
 
-Sunucu tek bir yapılandırma dosyası alır. Desteklenen yönergeler:
+The general syntax is:
 
-- `server`: `listen`, `server_name`, `client_max_body_size`, `error_page`
-- `location`: `root`, `index`, `allow_methods`, `autoindex`
-- yükleme: `upload_enable`, `upload_store`
-- CGI: `cgi_ext`, `cgi_path`
-- yönlendirme: `return`
-
-## Kapsamlı entegrasyon testi
-
-Gerekli araçlar: `bash`, `make`, `curl`, `python3`, `find`, `awk`, `sed` ve CGI
-testleri için `/usr/bin/php-cgi`.
-
-```sh
-./test/test.sh
+```bash
+./webserv [configuration_file]
 ```
 
-Betik varsayılan olarak temiz derleme yapar. Seçenekler:
+The configuration file controls things like:
 
-```sh
-./test/test.sh --no-build
-./test/test.sh --leak
-./test/test.sh --leak --no-build
-./test/test.sh --keep-temp
+* listening ports
+* server names
+* maximum request body size
+* custom error pages
+* allowed HTTP methods
+* root directories
+* default index files
+* autoindex
+* upload locations
+* CGI settings
+* HTTP redirects
+
+After starting the server, you can access it from a browser or send requests with `curl`.
+
+For example:
+
+```bash
+curl http://localhost:8080/
 ```
 
-`--leak`, Valgrind mevcutsa bellek hatası, bellek sızıntısı ve açık dosya
-tanıtıcısı kontrollerini ekler. `--keep-temp`, başarısız bir testi incelemek için
-üretilen geçici siteyi, çalışma configini ve sunucu logunu korur.
+The port depends on the configuration file being used.
 
-Test paketi şu alanları doğrular:
+## Resources
 
-- CLI kullanımı ve hatalı configlerin reddedilmesi
-- temiz C++98 derlemesi
-- HTTP/1.0 ve HTTP/1.1 yanıtları
-- istek satırı, Host, header ve gövde doğrulaması
-- 400, 403, 404, 405, 413, 414, 431, 500, 501 ve 505 yanıtları
-- statik dosyalar, MIME tipleri, index fallback ve autoindex
-- en uzun `location` eşleşmesi ve location sınırları
-- upload → GET → DELETE yaşam döngüsü
-- bellek içi ve geçici dosya üzerinden büyük gövde işleme
-- `client_max_body_size` sınır değerleri
-- chunked aktarım, chunk extension ve trailer doğrulaması
-- CGI GET/POST, ortam değişkenleri, CGI status/header aktarımı
-- 301, 302, 303, 307 ve 308 yönlendirmeleri
-- özel hata sayfaları ve `..` traversal engeli
-- aynı portta isim tabanlı virtual host ve farklı portta ikinci sunucu
-- eşzamanlı istekler ve hatalı isteklerden sonra sunucu sağlığı
-- SIGTERM ile temiz kapanış
-- Valgrind bellek, hata ve FD raporu
+Some references we used during the project:
 
-## Test fixture yapısı
+* [RFC 9110 - HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110)
+* [RFC 9112 - HTTP/1.1](https://www.rfc-editor.org/rfc/rfc9112)
+* [MDN HTTP Documentation](https://developer.mozilla.org/en-US/docs/Web/HTTP)
+* [NGINX Documentation](https://nginx.org/en/docs/)
+* [Linux epoll Documentation](https://man7.org/linux/man-pages/man7/epoll.7.html)
+* https://www.youtube.com/watch?v=L0jMBrCEQNQ&t=29s
+* https://www.youtube.com/watch?v=hWyBeEF3CqQ
+* https://www.youtube.com/watch?v=WuwUk7Mk80E&t=88s
 
-`config/test_all.conf` bir şablondur. İçindeki `__TEST_SITE__` alanları
-`test/test.sh` tarafından çalışma anında oluşturulan mutlak geçici site yoluyla
-değiştirilir. `website/` bu geçici site için kaynak fixture’dır.
+### AI Usage
 
-Upload ve DELETE testleri doğrudan proje içindeki `website/` klasöründe
-çalışmaz. Betik önce izole bir kopya oluşturur; böylece test tekrarları kaynak
-ağacında dosya bırakmaz veya mevcut dosyaları silmez.
+We used AI mainly as a support tool during development. It helped us with:
+
+* understanding some HTTP and networking concepts
+* thinking about possible edge cases
+* organizing the documentation
+* creating test scripts for debugging
