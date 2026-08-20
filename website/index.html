@@ -31,15 +31,15 @@
         <section class="card">
             <h2>CGI</h2>
             <div class="link-grid">
-                <a href="/cgi-bin/test.php?source=dashboard">CGI environment</a>
-                <a href="/cgi-bin/status.php">CGI custom status</a>
+                <a href="/cgi-bin/test.py?source=dashboard">Python CGI environment</a>
+                <a href="/cgi-bin/status.py">Python CGI custom status</a>
             </div>
-            <form action="/cgi-bin/test.php" method="GET">
+            <form action="/cgi-bin/test.py" method="GET">
                 <label for="test-get">GET parameter</label>
                 <input id="test-get" type="text" name="test_get" value="hello">
                 <button type="submit">Run CGI GET</button>
             </form>
-            <form action="/cgi-bin/test.php" method="POST">
+            <form action="/cgi-bin/test.py" method="POST">
                 <label for="test-post">POST parameter</label>
                 <input id="test-post" type="text" name="test_post" value="hello">
                 <button type="submit">Run CGI POST</button>

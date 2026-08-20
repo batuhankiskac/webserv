@@ -34,7 +34,7 @@ Useful tools:
 * `c++` for compilation
 * `make` for building the project
 * `curl` for sending HTTP requests
-* `php-cgi` for CGI testing
+* `python3` for CGI and integration testing
 * `valgrind` for optional memory checks
 
 ### Compilation

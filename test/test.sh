@@ -219,7 +219,7 @@ python3 -c 'import sys; sys.stdout.buffer.write(bytes(range(256)) * 4096)' \
     > "$SITE/assets/large-response.bin"
 PYTHON_CGI_BIN="$(command -v python3 || true)"
 sed -e "s#__TEST_SITE__#${SITE}#g" \
-    -e "s#__PY_CGI_PATH__#${PYTHON_CGI_BIN:-/usr/bin/python3}#g" \
+    -e "s#__PYTHON_CGI_PATH__#${PYTHON_CGI_BIN:-/usr/bin/python3}#g" \
     "$CONFIG_TEMPLATE" > "$CONFIG"
 
 section "CLI and configuration rejection"
@@ -521,66 +521,37 @@ python3 -c 'print("GET / HTTP/1.1\r\nHost: localhost\r\nX-Large: " + "a" * 33000
 R="$(<"${TEST_TMP}/large-header.response")"
 assert_status "Oversized request headers return 431" "431" "$R"
 
-section "CGI execution and environment"
-R="$(http -H 'X-Test-Fixture: HeaderValue' 'http://127.0.0.1:8080/cgi-bin/test.php?test_get=Codex%20Test')"
-assert_status "CGI GET returns 200" "200" "$R"
-assert_contains "CGI script executes" "PHP CGI Working!" "$(response_body "$R")"
-assert_contains "CGI receives decoded GET parameter" "Codex Test" "$(response_body "$R")"
-assert_contains "CGI receives query string" "test_get=Codex%20Test" "$(response_body "$R")"
-assert_contains "CGI receives HTTP headers" "HTTP_X_TEST_FIXTURE" "$(response_body "$R")"
-assert_contains "CGI receives header value" "HeaderValue" "$(response_body "$R")"
-assert_contains "CGI receives script name" "/cgi-bin/test.php" "$(response_body "$R")"
+section "Python CGI execution and environment"
+R="$(http -H 'X-Test-Fixture: HeaderValue' 'http://127.0.0.1:8080/cgi-bin/test.py?test_get=Codex%20Test')"
+assert_status "Python CGI GET returns 200" "200" "$R"
+assert_contains "Python CGI script executes" "Python CGI Working!" "$(response_body "$R")"
+assert_contains "Python CGI receives decoded GET parameter" "Codex Test" "$(response_body "$R")"
+assert_contains "Python CGI receives query string" "test_get=Codex%20Test" "$(response_body "$R")"
+assert_contains "Python CGI receives HTTP headers" "HTTP_X_TEST_FIXTURE" "$(response_body "$R")"
+assert_contains "Python CGI receives header value" "HeaderValue" "$(response_body "$R")"
+assert_contains "Python CGI receives script name" "/cgi-bin/test.py" "$(response_body "$R")"
 
 R="$(http -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
-    --data 'test_post=PostValue' http://127.0.0.1:8080/cgi-bin/test.php)"
-assert_status "CGI POST returns 200" "200" "$R"
-assert_contains "CGI receives POST form value" "PostValue" "$(response_body "$R")"
-assert_contains "CGI sees POST method" "<strong>Method:</strong> POST" "$(response_body "$R")"
+    --data 'test_post=PostValue' http://127.0.0.1:8080/cgi-bin/test.py)"
+assert_status "Python CGI POST returns 200" "200" "$R"
+assert_contains "Python CGI receives POST form value" "PostValue" "$(response_body "$R")"
+assert_contains "Python CGI sees POST method" "<strong>Method:</strong> POST" "$(response_body "$R")"
 
-R="$(http http://127.0.0.1:8080/cgi-bin/status.php)"
-assert_status "CGI-provided status is forwarded" "201" "$R"
-assert_header "CGI custom header is forwarded" "X-CGI-Fixture" "$R" "status"
-assert_contains "CGI custom-status body is forwarded" "CGI_STATUS_CREATED" "$(response_body "$R")"
+R="$(http http://127.0.0.1:8080/cgi-bin/status.py)"
+assert_status "Python CGI-provided status is forwarded" "201" "$R"
+assert_header "Python CGI custom header is forwarded" "X-CGI-Fixture" "$R" "status"
+assert_contains "Python CGI custom-status body is forwarded" "PYTHON_CGI_STATUS_CREATED" "$(response_body "$R")"
 
 R="$(http http://127.0.0.1:8080/cgi-bin/readme.txt)"
 assert_status "Non-CGI extension in CGI location is served statically" "200" "$R"
 assert_contains "Static file in CGI location has expected body" "must be served statically" "$(response_body "$R")"
 
-R="$(http http://127.0.0.1:8080/broken-cgi/fail.php)"
+R="$(http http://127.0.0.1:8080/broken-cgi/fail.py)"
 assert_status "Missing CGI interpreter produces 500" "500" "$R"
 assert_contains "Missing CGI interpreter reports execution failure" "CGI execution failed" "$(response_body "$R")"
 
-R="$(http http://127.0.0.1:8080/cgi-bin/oversized.php)"
-assert_status "CGI output above 8 MiB is rejected with 502" "502" "$R"
-
-section "Python CGI execution and environment"
-if [ -n "$PYTHON_CGI_BIN" ]; then
-    R="$(http -H 'X-Test-Fixture: PyHeaderValue' \
-        'http://127.0.0.1:8080/py-cgi/test.py?py_get=Python%20Value')"
-    assert_status "Python CGI GET returns 200" "200" "$R"
-    assert_contains "Python CGI script executes" "Python CGI Working!" "$(response_body "$R")"
-    assert_contains "Python CGI receives raw query string" "py_get=Python%20Value" "$(response_body "$R")"
-    assert_contains "Python CGI receives decoded GET parameter" "Python Value" "$(response_body "$R")"
-    assert_contains "Python CGI receives HTTP headers" "HTTP_X_TEST_FIXTURE" "$(response_body "$R")"
-    assert_contains "Python CGI receives header value" "PyHeaderValue" "$(response_body "$R")"
-    assert_contains "Python CGI receives script name" "/py-cgi/test.py" "$(response_body "$R")"
-
-    R="$(http -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
-        --data 'py_post=PyPostValue' http://127.0.0.1:8080/py-cgi/test.py)"
-    assert_status "Python CGI POST returns 200" "200" "$R"
-    assert_contains "Python CGI receives POST form value" "PyPostValue" "$(response_body "$R")"
-    assert_contains "Python CGI sees POST method" "<strong>Method:</strong> POST" "$(response_body "$R")"
-
-    R="$(http http://127.0.0.1:8080/py-cgi/status.py)"
-    assert_status "Python CGI-provided status is forwarded" "201" "$R"
-    assert_header "Python CGI custom header is forwarded" "X-CGI-Fixture" "$R" "status"
-    assert_contains "Python CGI custom-status body is forwarded" "PYTHON_CGI_STATUS_CREATED" "$(response_body "$R")"
-
-    R="$(http http://127.0.0.1:8080/py-cgi/oversized.py)"
-    assert_status "Python CGI output above 8 MiB is rejected with 502" "502" "$R"
-else
-    echo "  python3 not found; skipping Python CGI scenarios"
-fi
+R="$(http http://127.0.0.1:8080/cgi-bin/oversized.py)"
+assert_status "Python CGI output above 8 MiB is rejected with 502" "502" "$R"
 
 section "Redirects"
 for redirect_case in \
