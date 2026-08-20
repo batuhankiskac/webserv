@@ -233,7 +233,7 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 		}
 		if (!found) {
 			if (!loc.getAutoIndex()) {
-				_serveError(client, HTTP_FORBIDDEN, server);
+				_serveError(client, HTTP_NOT_FOUND, server);
 				return;
 			}
 			std::string	html = _generateAutoindex(filePath, reqPath);
@@ -326,6 +326,10 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 	envStorage.push_back("SERVER_PROTOCOL=" + client.request.getHttpVersion());
 	envStorage.push_back("REQUEST_METHOD=" + client.request.getMethod());
 	envStorage.push_back("QUERY_STRING=" + client.request.getQueryString());
+	std::string requestUri = reqPath;
+	if (!client.request.getQueryString().empty())
+		requestUri += "?" + client.request.getQueryString();
+	envStorage.push_back("REQUEST_URI=" + requestUri);
 	envStorage.push_back("SCRIPT_NAME=" + reqPath);
 	envStorage.push_back("SCRIPT_FILENAME=" + _joinLocationPath(loc, reqPath));
 	envStorage.push_back("PATH_INFO=" + reqPath);
@@ -508,7 +512,7 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 	std::string	body = "Upload successful.\r\n";
 	Response	resp;
 	resp.setHttpVersion(client.request.getHttpVersion());
-	resp.setStatus(HTTP_CREATED);
+	resp.setStatus(HTTP_OK);
 	resp.setBody(body);
 	resp.addHeader("Content-Type", "text/plain");
 	resp.addHeader("Content-Length", _sizeToString(body.size()));

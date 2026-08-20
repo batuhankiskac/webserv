@@ -7,6 +7,8 @@
 #include <cctype>
 #include <string>
 
+static const std::size_t MAX_CGI_RESPONSE_SIZE = 128 * 1024 * 1024;
+
 static std::string	buildCgiHttpResponse(const std::string& cgiOutput) {
 	std::size_t	sep = cgiOutput.find("\r\n\r\n");
 	std::size_t	sepLen = 4;
@@ -267,7 +269,7 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 
 	if (n > 0)
 	{
-		if (client.cgiResponse.size() + static_cast<std::size_t>(n) > 8 * 1024 * 1024) {
+		if (client.cgiResponse.size() + static_cast<std::size_t>(n) > MAX_CGI_RESPONSE_SIZE) {
 			epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
 			cgiReadFdToClientFd.erase(cgiFd);
 			close(cgiFd);

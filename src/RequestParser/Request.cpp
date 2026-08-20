@@ -247,6 +247,9 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 						_errno = -2;
 						return (-1);
 					}
+					std::stringstream bodyPath;
+					bodyPath << file.getPath() << client.clientFd;
+					client.requestBodyPath = bodyPath.str();
 				}
 			const int	result = unchunkBody(client.rawBuffer, client.bodyReceived, client.requestBodyFd, client.requestBody, maxBodySize);
 			if (!result)
