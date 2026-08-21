@@ -86,6 +86,19 @@ static std::string	_buildAllowHeaderValue(const std::vector<std::string>& allowe
 	return (out);
 }
 
+static void	_respond(Client& client, int status, const std::string& body,
+		const std::string& contentType) {
+	Response	resp;
+	resp.setHttpVersion(client.request.getHttpVersion());
+	resp.setStatus(status);
+	resp.setBody(body);
+	if (!contentType.empty())
+		resp.addHeader("Content-Type", contentType);
+	resp.addHeader("Content-Length", _sizeToString(body.size()));
+	resp.addHeader("Connection", "close");
+	client.response = resp.serialize();
+}
+
 static bool	_isImplementedMethod(const std::string& method) {
 	return (method == "GET" || method == "POST" || method == "DELETE");
 }
@@ -96,6 +109,23 @@ static bool	_isKnownHttpMethod(const std::string& method) {
 		method == "PUT" || method == "DELETE" || method == "CONNECT" ||
 		method == "OPTIONS" || method == "TRACE" || method == "PATCH"
 	);
+}
+
+static bool	_isMethodAllowed(const LocationBlock& location, const std::string& method) {
+	const std::vector<std::string>& allowed = location.getAllowMethods();
+	for (size_t i = 0; i < allowed.size(); ++i) {
+		if (allowed[i] == method)
+			return (true);
+	}
+	return (false);
+}
+
+static void	_serveMethodNotAllowed(Client& client, const ServerBlock& server,
+		const LocationBlock& location) {
+	Response	resp = Response::error(HTTP_METHOD_NOT_ALLOWED, server);
+	resp.setHttpVersion(client.request.getHttpVersion());
+	resp.addHeader("Allow", _buildAllowHeaderValue(location.getAllowMethods()));
+	client.response = resp.serialize();
 }
 
 static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
@@ -206,14 +236,7 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 				return;
 			}
 			std::string	html = _generateAutoindex(filePath, reqPath);
-				Response	resp;
-				resp.setHttpVersion(client.request.getHttpVersion());
-			resp.setStatus(HTTP_OK);
-			resp.setBody(html);
-			resp.addHeader("Content-Type", "text/html");
-			resp.addHeader("Content-Length", _sizeToString(html.size()));
-			resp.addHeader("Connection", "close");
-			client.response = resp.serialize();
+			_respond(client, HTTP_OK, html, "text/html");
 			return;
 		}
 	} else if (!S_ISREG(st.st_mode)) {
@@ -235,14 +258,7 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 		return;
 	}
 
-	Response	resp;
-	resp.setHttpVersion(client.request.getHttpVersion());
-	resp.setStatus(HTTP_OK);
-	resp.setBody(body);
-	resp.addHeader("Content-Type", _lookupMimeType(filePath));
-	resp.addHeader("Content-Length", _sizeToString(body.size()));
-	resp.addHeader("Connection", "close");
-	client.response = resp.serialize();
+	_respond(client, HTTP_OK, body, _lookupMimeType(filePath));
 }
 
 std::string	RequestHandler::_generateAutoindex(const std::string& filePath, const std::string& reqPath) {
@@ -352,7 +368,10 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 	}
 
 	int stdinFd = -1;
-	if (!client.requestBody.empty()) {
+	if (client.requestBodyFd != -1 && !client.requestBodyPath.empty())
+		stdinFd = open(client.requestBodyPath.c_str(), O_RDONLY);
+
+	if (stdinFd == -1 && !client.requestBody.empty()) {
 		std::stringstream ss;
 		ss << "/tmp/webserv_cgi_" << client.clientFd << "_" << static_cast<long>(std::time(NULL));
 		std::string tmpPath = ss.str();
@@ -383,6 +402,11 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
+	}
+	if (client.requestBodyFd != -1 && stdinFd == -1) {
+		close(cgiOut[0]); close(cgiOut[1]);
+		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+		return;
 	}
 
 	std::vector<std::string> envStorage;
@@ -462,7 +486,7 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 		if (!client.requestBody.empty()) {
 			out.write(client.requestBody.data(), static_cast<std::streamsize>(client.requestBody.size()));
 			written = !out.bad();
-	} else if (client.requestBodyFd != -1) {
+		} else if (client.requestBodyFd != -1) {
 			int readFd = open(client.requestBodyPath.c_str(), O_RDONLY);
 			if (readFd != -1) {
 				char buf[4096];
@@ -485,14 +509,7 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 	}
 
 	std::string	body = "Upload successful.\r\n";
-	Response	resp;
-	resp.setHttpVersion(client.request.getHttpVersion());
-	resp.setStatus(HTTP_OK);
-	resp.setBody(body);
-	resp.addHeader("Content-Type", "text/plain");
-	resp.addHeader("Content-Length", _sizeToString(body.size()));
-	resp.addHeader("Connection", "close");
-	client.response = resp.serialize();
+	_respond(client, HTTP_OK, body, "text/plain");
 }
 
 void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath) {
@@ -556,25 +573,13 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 	}
 
 	const std::string&	method = client.request.getMethod();
-	const std::string&	httpVersion = client.request.getHttpVersion();
-	const std::vector<std::string>&	allowed = loc->getAllowMethods();
-	bool	methodOk = false;
-	for (size_t i = 0; i < allowed.size(); ++i) {
-		if (allowed[i] == method) {
-			methodOk = true;
-			break;
-		}
-	}
 	const bool	isImplemented = _isImplementedMethod(method);
 	if (!isImplemented && !_isKnownHttpMethod(method)) {
 		_serveError(client, HTTP_NOT_IMPLEMENTED, server);
 		return;
 	}
-	if (!isImplemented || !methodOk) {
-		Response	resp = Response::error(HTTP_METHOD_NOT_ALLOWED, server);
-		resp.setHttpVersion(httpVersion);
-		resp.addHeader("Allow", _buildAllowHeaderValue(allowed));
-		client.response = resp.serialize();
+	if (!isImplemented || !_isMethodAllowed(*loc, method)) {
+		_serveMethodNotAllowed(client, server, *loc);
 		return;
 	}
 
