@@ -1,4 +1,6 @@
 #include "RequestParser.hpp"
+#include "Request.hpp"
+#include "HttpConstants.hpp"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -34,13 +36,13 @@ std::string RequestParser::_trim(const std::string& str, const std::string& char
 void RequestParser::_parseRequestLine(const std::string& line) {
 	size_t	methodEnd = line.find(' ');
 	if (methodEnd == std::string::npos) {
-		_setError(400);
+		_setError(HTTP_BAD_REQUEST);
 		return;
 	}
 
 	size_t	pathEnd = line.find(' ', methodEnd + 1);
 	if (pathEnd == std::string::npos) {
-		_setError(400);
+		_setError(HTTP_BAD_REQUEST);
 		return;
 	}
 
@@ -48,11 +50,11 @@ void RequestParser::_parseRequestLine(const std::string& line) {
 	std::string	fullPath = line.substr(methodEnd + 1, pathEnd - methodEnd - 1);
 	_httpVersion = line.substr(pathEnd + 1);
 	if (_method.empty() || fullPath.empty() || _httpVersion.empty()) {
-		_setError(400);
+		_setError(HTTP_BAD_REQUEST);
 		return;
 	}
-	if (fullPath.size() > 8190) {
-		_setError(414);
+	if (line.size() > MAX_REQUEST_LINE) {
+		_setError(HTTP_URI_TOO_LONG);
 		return;
 	}
 
@@ -66,7 +68,7 @@ void RequestParser::_parseRequestLine(const std::string& line) {
 	}
 
 	if (_httpVersion != "HTTP/1.1" && _httpVersion != "HTTP/1.0") {
-		_setError(505);
+		_setError(HTTP_VERSION_NOT_SUPPORTED);
 		return;
 	}
 
@@ -76,7 +78,7 @@ void RequestParser::_parseRequestLine(const std::string& line) {
 void RequestParser::_parseHeaderLine(const std::string& line) {
 	size_t	colonPos = line.find(':');
 	if (colonPos == std::string::npos) {
-		_setError(400);
+		_setError(HTTP_BAD_REQUEST);
 		return;
 	}
 
@@ -84,7 +86,7 @@ void RequestParser::_parseHeaderLine(const std::string& line) {
 	std::string	value = _trim(line.substr(colonPos + 1));
 
 	if (key.empty() || _headers.find(key) != _headers.end()) {
-		_setError(400);
+		_setError(HTTP_BAD_REQUEST);
 		return;
 	}
 	_headers[key] = value;
@@ -94,19 +96,19 @@ void RequestParser::_validateHeaders() {
 	std::string cl = getHeader("content-length");
 	for (size_t i = 0; i < cl.size(); ++i) {
 		if (!std::isdigit(static_cast<unsigned char>(cl[i]))) {
-			_setError(400);
+			_setError(HTTP_BAD_REQUEST);
 			return;
 		}
 	}
 	if (!cl.empty() && !getHeader("transfer-encoding").empty()) {
-		_setError(400);
+		_setError(HTTP_BAD_REQUEST);
 		return;
 	}
 	std::string te = getHeader("transfer-encoding");
 	std::string lower = te;
 	std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
 	if (!te.empty() && lower != "chunked")
-		_setError(400);
+		_setError(HTTP_BAD_REQUEST);
 }
 
 bool RequestParser::_handleRequestLine() {
@@ -132,7 +134,7 @@ bool RequestParser::_handleHeaders() {
 		if (_phase == ERROR)
 			return true;
 		if (_httpVersion == "HTTP/1.1" && getHeader("host").empty()) {
-			_setError(400);
+			_setError(HTTP_BAD_REQUEST);
 		} else {
 			_phase = COMPLETE;
 		}

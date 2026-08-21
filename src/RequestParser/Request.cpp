@@ -189,7 +189,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					_errno = -HTTP_PAYLOAD_TOO_LARGE;
 					return (-1);
 				}
-				if (client.contentLength <= MAX_REQUEST_LINE)
+					if (client.contentLength <= MAX_IN_MEMORY_BODY_SIZE)
 				{
 					client.bodyReceived += val;
 					client.requestBody.append(client.rawBuffer.substr(0, val));

@@ -441,7 +441,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		argv[1] = const_cast<char*>(physicalPath.c_str());
 		argv[2] = NULL;
 		execve(argv[0], argv, envp);
-		std::string fail = "Status: 500 Internal Server Error\r\n"
+		std::string fail = "Status: " + _sizeToString(HTTP_INTERNAL_SERVER_ERROR) + " Internal Server Error\r\n"
 		                   "Content-Type: text/plain\r\n\r\nCGI execution failed";
 		write(STDOUT_FILENO, fail.c_str(), fail.size());
 		std::exit(1);
