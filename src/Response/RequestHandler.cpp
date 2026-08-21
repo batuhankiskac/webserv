@@ -397,7 +397,13 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		std::size_t written = 0;
 		while (written < client.requestBody.size()) {
 			ssize_t n = write(tempFd, client.requestBody.c_str() + written, client.requestBody.size() - written);
-			if (n <= 0) { close(tempFd); std::remove(tmpPath.c_str()); close(cgiOut[0]); close(cgiOut[1]); _serveError(client, HTTP_INTERNAL_SERVER_ERROR, server); return; }
+			if (n <= 0) {
+				close(tempFd);
+				std::remove(tmpPath.c_str());
+				close(cgiOut[0]); close(cgiOut[1]);
+				_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+				return;
+			}
 			written += static_cast<std::size_t>(n);
 		}
 		close(tempFd);
