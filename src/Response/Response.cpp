@@ -24,11 +24,11 @@ static const ErrorInfo	g_errorTable[] = {
 	{ HTTP_INTERNAL_SERVER_ERROR,		"Internal Server Error",		"The server encountered an unexpected condition." },
 	{ HTTP_NOT_IMPLEMENTED,				"Not Implemented",				"The HTTP method is not implemented." },
 	{ HTTP_SERVICE_UNAVAILABLE,			"Service Unavailable",			"The server is temporarily unavailable." },
-	{ HTTP_VERSION_NOT_SUPPORTED,		"HTTP Version Not Supported",	"The HTTP version is not supported." }
+	{ HTTP_VERSION_NOT_SUPPORTED,		"HTTP Version Not Supported",	"The HTTP version is not supported." },
+	{ HTTP_BAD_GATEWAY,					"Bad Gateway",					"The upstream service returned an invalid response." },
+	{ HTTP_GATEWAY_TIMEOUT,				"Gateway Timeout",				"The upstream service did not respond in time." },
 };
 
-static const ErrorInfo	g_badGateway = { HTTP_BAD_GATEWAY, "Bad Gateway", "The upstream service returned an invalid response." };
-static const ErrorInfo	g_gatewayTimeout = { HTTP_GATEWAY_TIMEOUT, "Gateway Timeout", "The upstream service did not respond in time." };
 static const std::size_t	g_errorTableSize = sizeof(g_errorTable) / sizeof(g_errorTable[0]);
 
 Response::Response() : _status(200), _httpVersion("HTTP/1.1") { }
@@ -40,8 +40,6 @@ void Response::setHttpVersion(const std::string& version) { if (version == "HTTP
 const std::string& Response::getBody() const { return _body; }
 
 const ErrorInfo* Response::_lookupError(int code) {
-	if (code == HTTP_BAD_GATEWAY) return &g_badGateway;
-	if (code == HTTP_GATEWAY_TIMEOUT) return &g_gatewayTimeout;
 	for (std::size_t i = 0; i < g_errorTableSize; ++i) {
 		if (g_errorTable[i].code == code)
 			return &g_errorTable[i];
