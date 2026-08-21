@@ -457,8 +457,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 	client.cgiActive = true;
 }
 
-void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath) {
-	(void)reqPath;
+void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, const LocationBlock& loc) {
 	if (!loc.getUploadEnable()) {
 		_serveError(client, HTTP_FORBIDDEN, server);
 		return;
@@ -604,7 +603,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 	if (method == "GET")
 		_handleGet(client, server, *loc, reqPath);
 	else if (method == "POST")
-		_handlePost(client, server, *loc, reqPath);
+		_handlePost(client, server, *loc);
 	else if (method == "DELETE")
 		_handleDelete(client, server, *loc, reqPath);
 	else
