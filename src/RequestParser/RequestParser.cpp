@@ -147,14 +147,16 @@ bool RequestParser::_handleHeaders() {
 void RequestParser::parse(const std::string& rawRequest) {
 	_buffer.append(rawRequest);
 
-	static bool (RequestParser::*const handlers[])(void) = {
-		&RequestParser::_handleRequestLine,
-		&RequestParser::_handleHeaders
-	};
-
 	while (_phase != COMPLETE && _phase != ERROR) {
-		bool (RequestParser::*handler)(void) = handlers[_phase];
-		if (!(this->*handler)()) {
+		bool progressed = false;
+		if (_phase == REQUEST)
+			progressed = _handleRequestLine();
+		else if (_phase == HEADERS)
+			progressed = _handleHeaders();
+		else
+			break;
+
+		if (!progressed) {
 			break;
 		}
 	}

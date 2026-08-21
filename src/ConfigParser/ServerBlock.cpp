@@ -6,17 +6,7 @@
 #include <string>
 #include <vector>
 
-ServerBlock::ServerBlock() : _port(80), _clientMaxBodySize(1048576), _ip("0.0.0.0") {
-	_setupDirectives();
-}
-
-void ServerBlock::_setupDirectives() {
-	_directives["listen"] = &ServerBlock::_parseListen;
-	_directives["server_name"] = &ServerBlock::_parseServerName;
-	_directives["error_page"] = &ServerBlock::_parseErrorPage;
-	_directives["client_max_body_size"] = &ServerBlock::_parseClientMaxBodySize;
-	_directives["location"] = &ServerBlock::_parseLocation;
-}
+ServerBlock::ServerBlock() : _port(80), _clientMaxBodySize(1048576), _ip("0.0.0.0") {}
 
 size_t ServerBlock::_parseSizeWithUnit(const std::string& value, const std::string& name) {
 	if (value.empty()) {
@@ -76,12 +66,17 @@ void ServerBlock::parseServerBlock(const std::vector<std::string>& _tokens, size
 	i++;
 
 	while (i < _tokens.size() && _tokens[i] != "}") {
-		std::map<std::string, func>::iterator	it = _directives.find(_tokens[i]);
-		if (it != _directives.end()) {
-			(this->*it->second)(_tokens, i);
-		} else {
-			throw std::runtime_error("Invalid token: " + _tokens[i]);
-		}
+		const std::string& token = _tokens[i];
+		if (token == "listen")
+			_parseListen(_tokens, i);
+		else if (token == "error_page")
+			_parseErrorPage(_tokens, i);
+		else if (token == "client_max_body_size")
+			_parseClientMaxBodySize(_tokens, i);
+		else if (token == "location")
+			_parseLocation(_tokens, i);
+		else
+			throw std::runtime_error("Invalid token: " + token);
 	}
 
 	if (i >= _tokens.size() || _tokens[i] != "}") {
@@ -120,19 +115,6 @@ void ServerBlock::_parseListen(const std::vector<std::string>& _tokens, size_t& 
 
 	if (i >= _tokens.size() || _tokens[i] != ";") {
 		throw std::runtime_error("Invalid listen directive");
-	}
-	i++;
-}
-
-void ServerBlock::_parseServerName(const std::vector<std::string>& _tokens, size_t& i) {
-	i++;
-
-	while (i < _tokens.size() && _tokens[i] != ";") {
-		_serverNames.push_back(_tokens[i++]);
-	}
-
-	if (i >= _tokens.size() || _tokens[i] != ";") {
-		throw std::runtime_error("Invalid server_name directive");
 	}
 	i++;
 }
@@ -201,10 +183,6 @@ const std::string& ServerBlock::getIp() const {
 
 size_t ServerBlock::getClientMaxBodySize() const {
 	return _clientMaxBodySize;
-}
-
-const std::vector<std::string>& ServerBlock::getServerNames() const {
-	return _serverNames;
 }
 
 const std::map<std::string, std::string>& ServerBlock::getErrorPages() const {

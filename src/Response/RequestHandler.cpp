@@ -16,7 +16,6 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <arpa/inet.h>
 #include <vector>
 #include <string>
 
@@ -91,10 +90,7 @@ static bool	_isImplementedMethod(const std::string& method) {
 	return (method == "GET" || method == "POST" || method == "DELETE");
 }
 
-static bool	_isKnownHttpMethodForVersion(const std::string& method, const std::string& httpVersion) {
-	if (httpVersion == "HTTP/1.0") {
-		return (method == "GET" || method == "HEAD" || method == "POST");
-	}
+static bool	_isKnownHttpMethod(const std::string& method) {
 	return (
 		method == "GET" || method == "HEAD" || method == "POST" ||
 		method == "PUT" || method == "DELETE" || method == "CONNECT" ||
@@ -139,41 +135,14 @@ static std::string	_htmlEscape(const std::string& value) {
 	return out;
 }
 
-static std::string	_toLowerAscii(std::string value) {
-	for (size_t i = 0; i < value.size(); ++i)
-		value[i] = static_cast<char>(
-			std::tolower(static_cast<unsigned char>(value[i])));
-	return value;
-}
-
-std::string	RequestHandler::_extractHost(const Client& client) {
-	std::string	host = client.request.getHeader("host");
-	if (host.empty())
-		return ("");
-	size_t	colon = host.find(':');
-	if (colon != std::string::npos)
-		host = host.substr(0, colon);
-	return (_toLowerAscii(host));
-}
-
-const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& config, int port, const std::string& host) {
+const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& config, int port) {
 	const std::vector<ServerBlock>&	servers = config.getServers();
-	const ServerBlock*	firstMatch = NULL;
 
 	for (size_t i = 0; i < servers.size(); ++i) {
-		if (servers[i].getPort() != port)
-			continue;
-		if (!firstMatch)
-			firstMatch = &servers[i];
-		const std::vector<std::string>&	names = servers[i].getServerNames();
-		for (size_t j = 0; j < names.size(); ++j) {
-			if (_toLowerAscii(names[j]) == host)
-				return (servers[i]);
-		}
+		if (servers[i].getPort() == port)
+			return (servers[i]);
 	}
 
-	if (firstMatch)
-		return (*firstMatch);
 	return (servers[0]);
 }
 
@@ -562,8 +531,7 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 }
 
 void	RequestHandler::handle(Client& client, const WebservConfig& config, int port) {
-	std::string	host = _extractHost(client);
-	const ServerBlock&	server = _selectServerBlock(config, port, host);
+	const ServerBlock&	server = _selectServerBlock(config, port);
 
 	std::string	reqPath = client.request.getPath();
 	const LocationBlock*	loc = _selectLocationBlock(server, reqPath);
@@ -598,8 +566,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		}
 	}
 	const bool	isImplemented = _isImplementedMethod(method);
-	const bool	isKnownForVersion = _isKnownHttpMethodForVersion(method, httpVersion);
-	if (!isImplemented && !isKnownForVersion) {
+	if (!isImplemented && !_isKnownHttpMethod(method)) {
 		_serveError(client, HTTP_NOT_IMPLEMENTED, server);
 		return;
 	}

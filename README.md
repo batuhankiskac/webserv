@@ -87,7 +87,7 @@ The general syntax is:
 The configuration file controls things like:
 
 * listening ports
-* server names
+* listening interfaces
 * maximum request body size
 * custom error pages
 * allowed HTTP methods
