@@ -308,7 +308,11 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 		const LocationBlock& loc, const std::string& reqPath,
 		std::vector<std::string>& envStorage) {
 	envStorage.push_back("GATEWAY_INTERFACE=CGI/1.1");
+	envStorage.push_back("SERVER_SOFTWARE=webserv/1.0");
+	envStorage.push_back("SERVER_NAME=" + server.getIp());
+	envStorage.push_back("SERVER_PORT=" + _sizeToString(static_cast<size_t>(server.getPort())));
 	envStorage.push_back("SERVER_PROTOCOL=" + client.request.getHttpVersion());
+	envStorage.push_back("REMOTE_ADDR=" + client.clientIp);
 	envStorage.push_back("REQUEST_METHOD=" + client.request.getMethod());
 	envStorage.push_back("QUERY_STRING=" + client.request.getQueryString());
 	std::string requestUri = reqPath;
@@ -318,22 +322,18 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 	envStorage.push_back("SCRIPT_NAME=" + reqPath);
 	envStorage.push_back("SCRIPT_FILENAME=" + _joinLocationPath(loc, reqPath));
 	envStorage.push_back("PATH_INFO=" + reqPath);
-
 	envStorage.push_back("PATH_TRANSLATED=" + _joinLocationPath(loc, reqPath));
 	envStorage.push_back("REDIRECT_STATUS=200");
-
-	envStorage.push_back("SERVER_NAME=" + server.getIp());
-	envStorage.push_back("SERVER_PORT=" + _sizeToString(static_cast<size_t>(server.getPort())));
 
 	if (client.contentLength >= 0) {
 		envStorage.push_back("CONTENT_LENGTH=" + _sizeToString(static_cast<size_t>(client.contentLength)));
 	}
 	std::string contentType = client.request.getHeader("Content-Type");
-	if (!contentType.empty())
+	if (!contentType.empty()) {
 		envStorage.push_back("CONTENT_TYPE=" + contentType);
-	if (client.contentLength < 0) {
-		envStorage.push_back("CONTENT_LENGTH=0");
 	}
+	if (client.contentLength < 0)
+		envStorage.push_back("CONTENT_LENGTH=0");
 
 	const std::map<std::string, std::string, CaseInsensitiveCompare>& headers = client.request.getHeaders();
 	for (std::map<std::string, std::string, CaseInsensitiveCompare>::const_iterator it = headers.begin(); it != headers.end(); ++it) {

@@ -2,6 +2,8 @@
 #include "RequestHandler.hpp"
 #include "Response.hpp"
 #include <sys/wait.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <csignal>
 #include <sstream>
 #include <cctype>
@@ -391,7 +393,10 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					if (!(epollEvents.at(i).events & EPOLLIN))
 						continue ;
 
-					int	clientSocket = accept(currentFd, NULL, NULL);
+					struct sockaddr_in	addr;
+					socklen_t			addrLen = sizeof(addr);
+					std::memset(&addr, 0, sizeof(addr));
+					int	clientSocket = accept(currentFd, reinterpret_cast<struct sockaddr*>(&addr), &addrLen);
 					if (clientSocket == -1)
 					{
 						if (errno == EMFILE || errno == ENFILE)
@@ -429,6 +434,11 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					struct Client client;
 					client.clientFd = clientSocket;
 					client.port = listenFdToPort[currentFd];
+					unsigned long	ip = ntohl(addr.sin_addr.s_addr);
+					std::stringstream	ipStream;
+					ipStream << ((ip >> 24) & 0xFF) << '.' << ((ip >> 16) & 0xFF) << '.'
+						<< ((ip >> 8) & 0xFF) << '.' << (ip & 0xFF);
+					client.clientIp = ipStream.str();
 					clients[clientSocket] = client;
 					fcntl(clientSocket, F_SETFD, FD_CLOEXEC);
 

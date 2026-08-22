@@ -21,6 +21,7 @@ struct Client
 	int			requestBodyFd;
 	std::string	requestBodyPath;
 	int			port;
+	std::string	clientIp;
 
 	long long	contentLength;
 	RequestState	state;
