@@ -108,6 +108,26 @@ curl http://localhost:8080/
 
 The port depends on the configuration file being used.
 
+### Supplied subject tester
+
+The repository includes the supplied `tester` and `cgi_tester` binaries, the
+required YoupiBanane fixture tree, and a portable configuration template under
+`test/`.
+The binaries are x86-64 ELF files, so run this check on amd64 Linux (for
+example, an amd64 Ubuntu machine in OrbStack).
+
+From the repository root, run:
+
+```bash
+./test/run_official_tester.sh
+```
+
+The launcher rebuilds the server, starts it with
+`test/official-test.conf.in`, supplies the tester's four confirmation inputs,
+and stops the server when the tester exits. It creates the absolute-path
+configuration, temporary upload directory, and required directory symlink at
+runtime, then removes them on exit.
+
 ## Resources
 
 Some references we used during the project:

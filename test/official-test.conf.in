@@ -1,0 +1,29 @@
+# Template for the supplied 42 subject tester.
+# test/run_official_tester.sh replaces the placeholders with absolute paths.
+
+server {
+	listen 127.0.0.1:8080;
+	client_max_body_size 1000000000;
+
+	location / {
+		allow_methods GET;
+		root __FIXTURE__;
+		index index.html;
+	}
+
+	location /directory {
+		allow_methods GET POST;
+		root __FIXTURE__;
+		index youpi.bad_extension;
+		cgi_ext .bla;
+		cgi_path __CGI__;
+	}
+
+	location /post_body {
+		allow_methods POST;
+		root __FIXTURE__;
+		upload_enable on;
+		upload_store __UPLOAD__;
+		client_max_body_size 100;
+	}
+}
