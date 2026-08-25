@@ -130,13 +130,19 @@ static void	_serveMethodNotAllowed(Client& client, const ServerBlock& server,
 
 static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
 	std::string	root = loc.getRoot();
+	std::string	relativePath = reqPath;
+	const std::string&	locationPath = loc.getPath();
+
+	if (!locationPath.empty() &&
+		relativePath.compare(0, locationPath.size(), locationPath) == 0)
+		relativePath.erase(0, locationPath.size());
 	if (!root.empty() && root[root.size() - 1] == '/' &&
-		!reqPath.empty() && reqPath[0] == '/')
+		!relativePath.empty() && relativePath[0] == '/')
 		root.erase(root.size() - 1);
 	else if (!root.empty() && root[root.size() - 1] != '/' &&
-		!reqPath.empty() && reqPath[0] != '/')
+		!relativePath.empty() && relativePath[0] != '/')
 		root += '/';
-	return root + reqPath;
+	return root + relativePath;
 }
 
 static bool	_hasParentTraversal(const std::string& path) {
