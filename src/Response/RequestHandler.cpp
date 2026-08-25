@@ -14,7 +14,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <fcntl.h>
-#include <limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <vector>
@@ -135,20 +134,6 @@ static std::string	_normalizeLocationPath(const std::string& path) {
 	while (normalized.size() > 1 && normalized[normalized.size() - 1] == '/')
 		normalized.erase(normalized.size() - 1);
 	return normalized;
-}
-
-static std::string	_makeAbsolutePath(const std::string& path) {
-	if (path.empty() || path[0] == '/')
-		return path;
-
-	char	cwd[PATH_MAX];
-	if (getcwd(cwd, sizeof(cwd)) == NULL)
-		return path;
-
-	std::string	absolutePath = cwd;
-	if (!absolutePath.empty() && absolutePath[absolutePath.size() - 1] != '/')
-		absolutePath += '/';
-	return absolutePath + path;
 }
 
 static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
@@ -349,9 +334,9 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 		requestUri += "?" + client.request.getQueryString();
 	envStorage.push_back("REQUEST_URI=" + requestUri);
 	envStorage.push_back("SCRIPT_NAME=" + reqPath);
-	envStorage.push_back("SCRIPT_FILENAME=" + _makeAbsolutePath(_joinLocationPath(loc, reqPath)));
+	envStorage.push_back("SCRIPT_FILENAME=" + _joinLocationPath(loc, reqPath));
 	envStorage.push_back("PATH_INFO=" + reqPath);
-	envStorage.push_back("PATH_TRANSLATED=" + _makeAbsolutePath(_joinLocationPath(loc, reqPath)));
+	envStorage.push_back("PATH_TRANSLATED=" + _joinLocationPath(loc, reqPath));
 	envStorage.push_back("REDIRECT_STATUS=200");
 
 	if (client.contentLength >= 0) {
@@ -448,8 +433,8 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 
 	std::vector<std::string> envStorage;
 	char** envp = _buildCgiEnv(client, server, loc, reqPath, envStorage);
-	std::string physicalPath = _makeAbsolutePath(_joinLocationPath(loc, reqPath));
-	std::string cgiPath = _makeAbsolutePath(loc.getCgiPath());
+	std::string physicalPath = _joinLocationPath(loc, reqPath);
+	std::string cgiPath = loc.getCgiPath();
 
 	pid_t pid = fork();
 	if (pid == -1) {
@@ -470,8 +455,6 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 			dup2(stdinFd, STDIN_FILENO);
 			close(stdinFd);
 		}
-		if (chdir(loc.getRoot().c_str()) == -1)
-			std::exit(1);
 		char* argv[3];
 		argv[0] = const_cast<char*>(cgiPath.c_str());
 		argv[1] = const_cast<char*>(physicalPath.c_str());
