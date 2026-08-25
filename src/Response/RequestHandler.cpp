@@ -437,6 +437,14 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
+	if (stdinFd == -1) {
+		stdinFd = open("/dev/null", O_RDONLY);
+		if (stdinFd == -1) {
+			close(cgiOut[0]); close(cgiOut[1]);
+			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+			return;
+		}
+	}
 
 	std::vector<std::string> envStorage;
 	char** envp = _buildCgiEnv(client, server, loc, reqPath, envStorage);
