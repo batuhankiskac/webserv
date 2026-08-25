@@ -43,3 +43,7 @@
 # clang
 compile_commands.json
 .cache
+
+# Python test caches
+__pycache__/
+*.py[cod]

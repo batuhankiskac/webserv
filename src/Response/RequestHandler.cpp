@@ -64,6 +64,41 @@ static std::string	_sizeToString(size_t n) {
 	return (ss.str());
 }
 
+static bool	_openAnonymousTempFile(const std::string& purpose, int clientFd,
+		int& readFd, int& writeFd) {
+	static unsigned long	counter = 0;
+
+	readFd = -1;
+	writeFd = -1;
+	for (int attempt = 0; attempt < 128; ++attempt) {
+		std::stringstream	path;
+		path << "/var/tmp/webserv_cgi_" << purpose << "_"
+			<< static_cast<unsigned long>(std::time(NULL)) << "_"
+			<< clientFd << "_" << ++counter;
+		const std::string	name = path.str();
+		writeFd = open(name.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (writeFd == -1) {
+			if (errno == EEXIST)
+				continue;
+			return (false);
+		}
+		readFd = open(name.c_str(), O_RDONLY);
+		if (readFd == -1 || std::remove(name.c_str()) != 0
+			|| fcntl(readFd, F_SETFD, FD_CLOEXEC) == -1
+			|| fcntl(writeFd, F_SETFD, FD_CLOEXEC) == -1) {
+			if (readFd != -1)
+				close(readFd);
+			close(writeFd);
+			std::remove(name.c_str());
+			readFd = -1;
+			writeFd = -1;
+			return (false);
+		}
+		return (true);
+	}
+	return (false);
+}
+
 static std::string	_buildAllowHeaderValue(const std::vector<std::string>& allowed) {
 	if (allowed.empty())
 		return ("GET");
@@ -97,6 +132,7 @@ static void	_respond(Client& client, int status, const std::string& body,
 	resp.addHeader("Content-Length", _sizeToString(body.size()));
 	resp.addHeader("Connection", "close");
 	client.response = resp.serialize();
+	client.responseOffset = 0;
 }
 
 static bool	_isImplementedMethod(const std::string& method) {
@@ -126,6 +162,7 @@ static void	_serveMethodNotAllowed(Client& client, const ServerBlock& server,
 	resp.setHttpVersion(client.request.getHttpVersion());
 	resp.addHeader("Allow", _buildAllowHeaderValue(location.getAllowMethods()));
 	client.response = resp.serialize();
+	client.responseOffset = 0;
 }
 
 static std::string	_normalizeLocationPath(const std::string& path) {
@@ -213,6 +250,7 @@ void	RequestHandler::_serveError(Client& client, int code, const ServerBlock& se
 	Response	resp = Response::error(code, server);
 	resp.setHttpVersion(client.request.getHttpVersion());
 	client.response = resp.serialize();
+	client.responseOffset = 0;
 }
 
 void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath) {
@@ -369,14 +407,31 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 
 void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		const LocationBlock& loc, const std::string& reqPath) {
-	int cgiOut[2];
-	if (pipe(cgiOut) == -1) {
+	client.cgiState = CGI_NONE;
+
+	int	outputReadFd;
+	int	outputWriteFd;
+	if (!_openAnonymousTempFile("output", client.clientFd,
+		outputReadFd, outputWriteFd)) {
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
-	if (fcntl(cgiOut[0], F_SETFL, O_NONBLOCK) == -1) {
+
+	int cgiOut[2];
+	if (pipe(cgiOut) == -1) {
+		close(outputReadFd);
+		close(outputWriteFd);
+		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+		return;
+	}
+	int	readFlags = fcntl(cgiOut[0], F_GETFL, 0);
+	if (readFlags == -1 || fcntl(cgiOut[0], F_SETFL, readFlags | O_NONBLOCK) == -1
+		|| fcntl(cgiOut[0], F_SETFD, FD_CLOEXEC) == -1
+		|| fcntl(cgiOut[1], F_SETFD, FD_CLOEXEC) == -1) {
 		close(cgiOut[0]);
 		close(cgiOut[1]);
+		close(outputReadFd);
+		close(outputWriteFd);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
@@ -386,39 +441,40 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		stdinFd = open(client.requestBodyPath.c_str(), O_RDONLY);
 
 	if (stdinFd == -1 && !client.requestBody.empty()) {
-		std::stringstream ss;
-		ss << "/tmp/webserv_cgi_" << client.clientFd << "_" << static_cast<long>(std::time(NULL));
-		std::string tmpPath = ss.str();
-		int tempFd = open(tmpPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-		if (tempFd == -1) {
+		int	inputReadFd;
+		int	inputWriteFd;
+		if (!_openAnonymousTempFile("input", client.clientFd,
+			inputReadFd, inputWriteFd)) {
 			close(cgiOut[0]);
 			close(cgiOut[1]);
+			close(outputReadFd);
+			close(outputWriteFd);
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
 		std::size_t written = 0;
 		while (written < client.requestBody.size()) {
-			ssize_t n = write(tempFd, client.requestBody.c_str() + written, client.requestBody.size() - written);
+			ssize_t n = write(inputWriteFd, client.requestBody.c_str() + written, client.requestBody.size() - written);
+			if (n == -1 && errno == EINTR)
+				continue;
 			if (n <= 0) {
-				close(tempFd);
-				std::remove(tmpPath.c_str());
+				close(inputReadFd);
+				close(inputWriteFd);
 				close(cgiOut[0]); close(cgiOut[1]);
+				close(outputReadFd);
+				close(outputWriteFd);
 				_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 				return;
 			}
 			written += static_cast<std::size_t>(n);
 		}
-		close(tempFd);
-		stdinFd = open(tmpPath.c_str(), O_RDONLY);
-		std::remove(tmpPath.c_str());
-		if (stdinFd == -1) {
-			close(cgiOut[0]); close(cgiOut[1]);
-			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
-			return;
-		}
+		close(inputWriteFd);
+		stdinFd = inputReadFd;
 	}
 	if (client.requestBodyFd != -1 && stdinFd == -1) {
 		close(cgiOut[0]); close(cgiOut[1]);
+		close(outputReadFd);
+		close(outputWriteFd);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
@@ -426,6 +482,8 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		stdinFd = open("/dev/null", O_RDONLY);
 		if (stdinFd == -1) {
 			close(cgiOut[0]); close(cgiOut[1]);
+			close(outputReadFd);
+			close(outputWriteFd);
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
@@ -441,7 +499,9 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		delete[] envp;
 		close(cgiOut[0]);
 		close(cgiOut[1]);
-		if (stdinFd != -1 && stdinFd != client.requestBodyFd)
+		close(outputReadFd);
+		close(outputWriteFd);
+		if (stdinFd != -1)
 			close(stdinFd);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
@@ -451,6 +511,8 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		close(cgiOut[0]);
 		dup2(cgiOut[1], STDOUT_FILENO);
 		close(cgiOut[1]);
+		close(outputReadFd);
+		close(outputWriteFd);
 		if (stdinFd != -1) {
 			dup2(stdinFd, STDIN_FILENO);
 			close(stdinFd);
@@ -463,18 +525,23 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		std::string fail = "Status: " + _sizeToString(HTTP_INTERNAL_SERVER_ERROR) + " Internal Server Error\r\n"
 		                   "Content-Type: text/plain\r\n\r\nCGI execution failed";
 		write(STDOUT_FILENO, fail.c_str(), fail.size());
-		std::exit(1);
+		_exit(1);
 	}
 
 	close(cgiOut[1]);
-	if (stdinFd != -1 && stdinFd != client.requestBodyFd)
+	if (stdinFd != -1)
 		close(stdinFd);
 	delete[] envp;
 
 	client.cgiOutFd = cgiOut[0];
 	client.cgiPid = pid;
-	client.cgiResponse.clear();
-	client.cgiActive = true;
+	client.cgiBodyFd = outputReadFd;
+	client.cgiBodyWriteFd = outputWriteFd;
+	client.cgiBytesReceived = 0;
+	client.cgiBodyRemaining = 0;
+	client.cgiBodyBuffer.clear();
+	client.cgiBodyBufferOffset = 0;
+	client.cgiState = CGI_RUNNING;
 }
 
 void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, const LocationBlock& loc) {
@@ -564,9 +631,13 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 	resp.addHeader("Content-Length", "0");
 	resp.addHeader("Connection", "close");
 	client.response = resp.serialize();
+	client.responseOffset = 0;
 }
 
 void	RequestHandler::handle(Client& client, const WebservConfig& config, int port) {
+	client.response.clear();
+	client.responseOffset = 0;
+	client.cgiState = CGI_NONE;
 	const ServerBlock&	server = _selectServerBlock(config, port);
 
 	std::string	reqPath = client.request.getPath();
@@ -588,6 +659,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		resp.addHeader("Content-Length", "0");
 		resp.addHeader("Connection", "close");
 		client.response = resp.serialize();
+		client.responseOffset = 0;
 		return;
 	}
 
@@ -616,7 +688,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 	if (!cgiExt.empty() && !cgiPath.empty() &&
 		reqPath.size() >= cgiExt.size() &&
 		reqPath.compare(reqPath.size() - cgiExt.size(), cgiExt.size(), cgiExt) == 0) {
-		_handleCgi(client, server, *loc, reqPath);
+		client.cgiState = CGI_QUEUED;
 		return;
 	}
 
@@ -628,4 +700,17 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		_handleDelete(client, server, *loc, reqPath);
 	else
 		_serveError(client, HTTP_NOT_IMPLEMENTED, server);
+}
+
+void	RequestHandler::startCgi(Client& client, const WebservConfig& config, int port) {
+	const ServerBlock&	server = _selectServerBlock(config, port);
+	const std::string	reqPath = client.request.getPath();
+	const LocationBlock*	loc = _selectLocationBlock(server, reqPath);
+
+	if (!loc) {
+		client.cgiState = CGI_NONE;
+		_serveError(client, HTTP_NOT_FOUND, server);
+		return;
+	}
+	_handleCgi(client, server, *loc, reqPath);
 }

@@ -35,7 +35,7 @@ int	main(int argc, char** argv) {
 	try {
 		WebservConfig	config(argv[1]);
 
-		file.setPath("/tmp/webserv_body_");
+		file.setPath("/var/tmp/webserv_body_");
 
 		std::set<std::pair<std::string, int> >	seen;
 		const std::vector<ServerBlock>&	blocks = config.getServers();

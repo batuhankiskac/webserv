@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <map>
+#include <deque>
 #include <ctime>
 #include <csignal>
 
@@ -40,15 +41,27 @@ class ListenAndAcceptReqs
 		std::map<int, time_t> blockedListeners;
 
 		std::map<int, int> cgiReadFdToClientFd;
+		std::map<pid_t, int> cgiPidToClientFd;
+		std::deque<int> pendingCgiClients;
+		std::size_t activeCgiCount;
 
 		File& file;
 		const WebservConfig& config;
 
 		size_t	_getMaxBodySize(int port) const;
-		void	_releaseClientResources(Client& client, bool waitForCgi);
+		void	_releaseCgiSlot(Client& client);
+		void	_releaseClientResources(Client& client);
+		void	_reapCgiChildren();
+		void	_refreshTimeout(int fd, int tour, std::map<int, int>& fdTargetTour,
+			std::vector<std::vector<int> >& timerWheel);
+		void	_startQueuedCgis(int tour, std::map<int, int>& fdTargetTour,
+			std::vector<std::vector<int> >& timerWheel);
+		bool	_prepareCgiResponse(Client& client);
+		int	_sendClientData(Client& client);
 		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
 		bool	_sendErrorAndMod(int fd, Client& client, int code);
-		void	_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour);
+		void	_handleCgiRead(int cgiFd, int tour, std::map<int, int>& fdTargetTour,
+			std::vector<std::vector<int> >& timerWheel);
 
 		class ListenOrAcceptionError : public std::exception
 		{
