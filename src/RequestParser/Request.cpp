@@ -229,7 +229,6 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 						total_written += written;
 					}
 					client.bodyReceived += total_written;
-					client.requestBody.append(client.rawBuffer.substr(0, total_written));
 					client.rawBuffer.erase(0, total_written);
 					if (client.bodyReceived == static_cast<std::size_t>(client.contentLength))
 					{

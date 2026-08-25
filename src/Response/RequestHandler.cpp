@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <vector>
@@ -128,10 +129,32 @@ static void	_serveMethodNotAllowed(Client& client, const ServerBlock& server,
 	client.response = resp.serialize();
 }
 
+static std::string	_normalizeLocationPath(const std::string& path) {
+	std::string	normalized = path;
+
+	while (normalized.size() > 1 && normalized[normalized.size() - 1] == '/')
+		normalized.erase(normalized.size() - 1);
+	return normalized;
+}
+
+static std::string	_makeAbsolutePath(const std::string& path) {
+	if (path.empty() || path[0] == '/')
+		return path;
+
+	char	cwd[PATH_MAX];
+	if (getcwd(cwd, sizeof(cwd)) == NULL)
+		return path;
+
+	std::string	absolutePath = cwd;
+	if (!absolutePath.empty() && absolutePath[absolutePath.size() - 1] != '/')
+		absolutePath += '/';
+	return absolutePath + path;
+}
+
 static std::string	_joinLocationPath(const LocationBlock& loc, const std::string& reqPath) {
 	std::string	root = loc.getRoot();
 	std::string	relativePath = reqPath;
-	const std::string&	locationPath = loc.getPath();
+	const std::string	locationPath = _normalizeLocationPath(loc.getPath());
 
 	if (!locationPath.empty() &&
 		relativePath.compare(0, locationPath.size(), locationPath) == 0)
@@ -188,7 +211,7 @@ const LocationBlock*	RequestHandler::_selectLocationBlock(const ServerBlock& ser
 	size_t	bestLen = 0;
 
 	for (size_t i = 0; i < locations.size(); ++i) {
-		const std::string&	locPath = locations[i].getPath();
+		const std::string	locPath = _normalizeLocationPath(locations[i].getPath());
 		bool boundary = locPath == "/" || path.size() == locPath.size() ||
 			(path.size() > locPath.size() && path[locPath.size()] == '/');
 		if (boundary && path.compare(0, locPath.size(), locPath) == 0) {
@@ -326,9 +349,9 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 		requestUri += "?" + client.request.getQueryString();
 	envStorage.push_back("REQUEST_URI=" + requestUri);
 	envStorage.push_back("SCRIPT_NAME=" + reqPath);
-	envStorage.push_back("SCRIPT_FILENAME=" + _joinLocationPath(loc, reqPath));
+	envStorage.push_back("SCRIPT_FILENAME=" + _makeAbsolutePath(_joinLocationPath(loc, reqPath)));
 	envStorage.push_back("PATH_INFO=" + reqPath);
-	envStorage.push_back("PATH_TRANSLATED=" + _joinLocationPath(loc, reqPath));
+	envStorage.push_back("PATH_TRANSLATED=" + _makeAbsolutePath(_joinLocationPath(loc, reqPath)));
 	envStorage.push_back("REDIRECT_STATUS=200");
 
 	if (client.contentLength >= 0) {
@@ -417,6 +440,8 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 
 	std::vector<std::string> envStorage;
 	char** envp = _buildCgiEnv(client, server, loc, reqPath, envStorage);
+	std::string physicalPath = _makeAbsolutePath(_joinLocationPath(loc, reqPath));
+	std::string cgiPath = _makeAbsolutePath(loc.getCgiPath());
 
 	pid_t pid = fork();
 	if (pid == -1) {
@@ -439,8 +464,6 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		}
 		if (chdir(loc.getRoot().c_str()) == -1)
 			std::exit(1);
-		std::string physicalPath = _joinLocationPath(loc, reqPath);
-		std::string cgiPath = loc.getCgiPath();
 		char* argv[3];
 		argv[0] = const_cast<char*>(cgiPath.c_str());
 		argv[1] = const_cast<char*>(physicalPath.c_str());
