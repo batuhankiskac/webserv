@@ -13,7 +13,7 @@
 #include "File.hpp"
 #include "HttpConstants.hpp"
 
-#define MAX_CHUNK_LINE_SIZE	256
+#define CHUNK_SEMI_SIZE		256
 #define MAX_REQUEST_LINE	8192 // Maximum request-line size, excluding CRLF
 #define MAX_HEADERS_SIZE	32768
 #define MAX_IN_MEMORY_BODY_SIZE	8192

@@ -3,144 +3,102 @@
 
 int	Request::_errno = 0;
 
-static int	_hexDigit(char c)
+static int	unchunkBody(std::string& rawBuffer, std::size_t& bodyReceived,
+		int fileFd, const size_t maxBodySize)
 {
-	if (c >= '0' && c <= '9')
-		return (c - '0');
-	if (c >= 'a' && c <= 'f')
-		return (c - 'a' + 10);
-	if (c >= 'A' && c <= 'F')
-		return (c - 'A' + 10);
-	return (-1);
-}
-
-static int	_parseChunkSize(const std::string& line, std::size_t& chunkSize)
-{
-	const std::size_t	semi = line.find(';');
-	const std::size_t	end = semi == std::string::npos ? line.size() : semi;
-	const std::size_t	maxSize = static_cast<std::size_t>(-1);
-
-	if (end == 0)
-		return (-HTTP_BAD_REQUEST);
-	chunkSize = 0;
-	for (std::size_t i = 0; i < end; ++i)
+	while (!rawBuffer.empty())
 	{
-		const int	digit = _hexDigit(line[i]);
-		if (digit == -1)
-			return (-HTTP_BAD_REQUEST);
-		if (chunkSize > (maxSize - static_cast<std::size_t>(digit)) / 16)
-			return (-HTTP_PAYLOAD_TOO_LARGE);
-		chunkSize = chunkSize * 16 + static_cast<std::size_t>(digit);
-	}
-	return (0);
-}
+		std::size_t	crlf_pos = rawBuffer.find("\r\n");
+		if (crlf_pos == std::string::npos)
+			return (1);
 
-static int	_writeAll(int fd, const char* data, std::size_t size)
-{
-	std::size_t	written = 0;
+		std::string	size_line = rawBuffer.substr(0, crlf_pos);
 
-	while (written < size)
-	{
-		const ssize_t	result = write(fd, data + written, size - written);
-		if (result > 0)
+		std::size_t	semi_pos = size_line.find(';');
+		std::string	size_str;
+
+		if (semi_pos != std::string::npos)
 		{
-			written += static_cast<std::size_t>(result);
-			continue ;
-		}
-		if (result == -1 && errno == EINTR)
-			continue ;
-		return (-HTTP_INTERNAL_SERVER_ERROR);
-	}
-	return (0);
-}
-
-static int	_processChunkedBody(Client& client, const size_t maxBodySize)
-{
-	while (true)
-	{
-		if (client.chunkState == CHUNK_READING_SIZE)
-		{
-			const std::size_t	crlf = client.rawBuffer.find("\r\n");
-			if (crlf == std::string::npos)
-			{
-				if (client.rawBuffer.size() > MAX_CHUNK_LINE_SIZE)
-					return (-HTTP_URI_TOO_LONG);
-				return (1);
-			}
-			if (crlf > MAX_CHUNK_LINE_SIZE)
+			if (size_line.length() > CHUNK_SEMI_SIZE)
 				return (-HTTP_URI_TOO_LONG);
 
-			std::size_t	chunkSize = 0;
-			const int	parseResult = _parseChunkSize(client.rawBuffer.substr(0, crlf), chunkSize);
-			if (parseResult != 0)
-				return (parseResult);
-			if (client.bodyReceived > maxBodySize ||
-				chunkSize > maxBodySize - client.bodyReceived)
-				return (-HTTP_PAYLOAD_TOO_LARGE);
-
-			client.rawBuffer.erase(0, crlf + 2);
-			if (chunkSize == 0)
-				client.chunkState = CHUNK_READING_TRAILERS;
-			else
-			{
-				client.chunkBytesRemaining = chunkSize;
-				client.chunkState = CHUNK_READING_DATA;
-			}
-		}
-		else if (client.chunkState == CHUNK_READING_DATA)
-		{
-			if (client.rawBuffer.empty())
-				return (1);
-			const std::size_t	toWrite = client.rawBuffer.size() < client.chunkBytesRemaining
-				? client.rawBuffer.size() : client.chunkBytesRemaining;
-			const int	writeResult = _writeAll(client.requestBodyFd,
-				client.rawBuffer.data(), toWrite);
-			if (writeResult != 0)
-				return (writeResult);
-			client.rawBuffer.erase(0, toWrite);
-			client.bodyReceived += toWrite;
-			client.chunkBytesRemaining -= toWrite;
-			if (client.chunkBytesRemaining == 0)
-				client.chunkState = CHUNK_READING_DATA_CRLF;
-			else
-				return (1);
-		}
-		else if (client.chunkState == CHUNK_READING_DATA_CRLF)
-		{
-			if (client.rawBuffer.empty())
-				return (1);
-			if (client.rawBuffer[0] != '\r')
-				return (-HTTP_BAD_REQUEST);
-			if (client.rawBuffer.size() < 2)
-				return (1);
-			if (client.rawBuffer[1] != '\n')
-				return (-HTTP_BAD_REQUEST);
-			client.rawBuffer.erase(0, 2);
-			client.chunkState = CHUNK_READING_SIZE;
+			size_str = size_line.substr(0, semi_pos);
 		}
 		else
 		{
-			const std::size_t	crlf = client.rawBuffer.find("\r\n");
-			if (crlf == std::string::npos)
-			{
-				if (client.chunkTrailerBytes + client.rawBuffer.size() > MAX_HEADERS_SIZE)
-					return (-HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE);
-				return (1);
-			}
-			if (client.chunkTrailerBytes + crlf + 2 > MAX_HEADERS_SIZE)
-				return (-HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE);
-			client.chunkTrailerBytes += crlf + 2;
-			if (crlf == 0)
-			{
-				client.rawBuffer.erase(0, 2);
+			size_str = size_line;
+		}
+		if (size_str.empty())
+			return (-HTTP_BAD_REQUEST);
+
+		char*	end_ptr;
+		long	chunk_size = std::strtol(size_str.c_str(), &end_ptr, 16);
+
+		if ((*end_ptr != '\0' && *end_ptr != ' ' && *end_ptr != '\t') ||
+				(chunk_size < 0))
+		{
+			return (-HTTP_BAD_REQUEST);
+		}
+
+		if (chunk_size == 0)
+		{
+			if (rawBuffer.size() >= crlf_pos + 4 && rawBuffer.compare(crlf_pos + 2, 2, "\r\n") == 0) {
+				rawBuffer.erase(0, crlf_pos + 4);
 				return (0);
 			}
-			const std::string	line = client.rawBuffer.substr(0, crlf);
-			if (line[0] == ' ' || line[0] == '\t' || line.find(':') == std::string::npos || line[0] == ':')
-				return (-HTTP_BAD_REQUEST);
-			client.rawBuffer.erase(0, crlf + 2);
+			std::size_t trailerEnd = rawBuffer.find("\r\n\r\n", crlf_pos + 2);
+			if (trailerEnd == std::string::npos)
+				return (1);
+			std::string trailers = rawBuffer.substr(crlf_pos + 2, trailerEnd - crlf_pos - 2);
+			if (!trailers.empty()) {
+				std::size_t start = 0;
+				while (start < trailers.size()) {
+					std::size_t end = trailers.find("\r\n", start);
+					if (end == std::string::npos) end = trailers.size();
+					if (trailers.find(':', start) == std::string::npos || trailers.find(':', start) > end)
+						return (-HTTP_BAD_REQUEST);
+					start = end + 2;
+				}
+			}
+			rawBuffer.erase(0, trailerEnd + 4);
+			return (0);
 		}
+
+		std::size_t	total_chunk_bytes = crlf_pos + 2 + chunk_size + 2;
+
+		if (rawBuffer.length() < total_chunk_bytes)
+			return (1);
+
+		if (rawBuffer.compare(crlf_pos + 2 + chunk_size, 2, "\r\n") != 0)
+		{
+			return (-HTTP_BAD_REQUEST);
+		}
+
+		if (bodyReceived + static_cast<std::size_t>(chunk_size) > maxBodySize)
+		{
+			return (-HTTP_PAYLOAD_TOO_LARGE);
+		}
+
+		ssize_t written = 0;
+		while (written < static_cast<ssize_t>(chunk_size))
+		{
+			const	ssize_t remaining = chunk_size - written;
+			const	char* current_ptr = rawBuffer.c_str() + crlf_pos + 2 + written;
+			const	ssize_t result = write(fileFd, current_ptr, remaining);
+
+			if (result == -1)
+			{
+				return (-HTTP_INTERNAL_SERVER_ERROR);
+			}
+
+			bodyReceived += result;
+			written += result;
+		}
+
+		rawBuffer.erase(0, total_chunk_bytes);
 	}
+
+	return (1);
 }
 
 int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
@@ -154,16 +112,9 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 
 	{
 		char	buffer[MAX_REQUEST_LINE];
-		int	result;
-		do
-		{
-			result = recv(client.clientFd, buffer, sizeof(buffer), 0);
-		}
-		while (result == -1 && errno == EINTR);
+		int	result = recv(client.clientFd, buffer, sizeof(buffer), 0);
 		if (result == -1)
 		{
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return (1);
 			_errno = -HTTP_INTERNAL_SERVER_ERROR;
 			return (-1);
 		}
@@ -230,7 +181,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 			}
 			if (client.state == READING_BODY)
 			{
-				const std::size_t	val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived) 
+				const std::size_t	val = client.rawBuffer.size() > (client.contentLength - client.bodyReceived)
 									? (client.contentLength - client.bodyReceived) : client.rawBuffer.size();
 
 				if (client.bodyReceived + val > static_cast<std::size_t>(client.contentLength))
@@ -238,7 +189,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					_errno = -HTTP_PAYLOAD_TOO_LARGE;
 					return (-1);
 				}
-				if (client.contentLength <= MAX_IN_MEMORY_BODY_SIZE)
+					if (client.contentLength <= MAX_IN_MEMORY_BODY_SIZE)
 				{
 					client.bodyReceived += val;
 					client.requestBody.append(client.rawBuffer.substr(0, val));
@@ -264,8 +215,8 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					std::size_t total_written = 0;
 					while (total_written < val)
 					{
-						const ssize_t written = write(client.requestBodyFd, 
-													client.rawBuffer.c_str() + total_written, 
+						const ssize_t written = write(client.requestBodyFd,
+													client.rawBuffer.c_str() + total_written,
 													val - total_written);
 
 						if (written <= 0)
@@ -273,7 +224,7 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 							file.closeFile(client.clientFd);
 							client.requestBodyFd = -1;
 							_errno = -HTTP_INTERNAL_SERVER_ERROR;
-							return (-1); 
+							return (-1);
 						}
 						total_written += written;
 					}
@@ -299,12 +250,13 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					bodyPath << file.getPath() << client.clientFd;
 					client.requestBodyPath = bodyPath.str();
 				}
-				const int	result = _processChunkedBody(client, maxBodySize);
-				if (!result)
-				{
-					client.contentLength = client.bodyReceived;
-					client.state = REQUEST_COMPLETE;
-				}
+			const int	result = unchunkBody(client.rawBuffer, client.bodyReceived,
+				client.requestBodyFd, maxBodySize);
+			if (!result)
+			{
+				client.contentLength = client.bodyReceived;
+				client.state = REQUEST_COMPLETE;
+			}
 				else if (result < 0)
 				{
 					if (result <= -HTTP_BAD_REQUEST)

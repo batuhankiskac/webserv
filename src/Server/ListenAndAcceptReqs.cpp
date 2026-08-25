@@ -10,104 +10,58 @@
 #include <string>
 
 static const std::size_t MAX_CGI_RESPONSE_SIZE = 128 * 1024 * 1024;
-static const std::size_t MAX_CGI_HEADER_SIZE = 32 * 1024;
-static const std::size_t CGI_IO_BUFFER_SIZE = 32 * 1024;
 static const std::size_t MAX_ACTIVE_CGI = 4;
 
-enum SendResult {
-	SEND_FAILED = -1,
-	SEND_PENDING = 0,
-	SEND_COMPLETE = 1,
-	SEND_PROGRESS = 2
-};
-
-static std::string	_toLower(const std::string& value) {
-	std::string	lower = value;
-
-	for (std::size_t i = 0; i < lower.size(); ++i)
-		lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lower[i])));
-	return (lower);
-}
-
-static std::string	_defaultCgiReason(int status) {
-	switch (status) {
-		case HTTP_OK: return ("OK");
-		case HTTP_CREATED: return ("Created");
-		case HTTP_NO_CONTENT: return ("No Content");
-		case HTTP_FOUND: return ("Found");
-		case HTTP_BAD_REQUEST: return ("Bad Request");
-		case HTTP_FORBIDDEN: return ("Forbidden");
-		case HTTP_NOT_FOUND: return ("Not Found");
-		case HTTP_INTERNAL_SERVER_ERROR: return ("Internal Server Error");
-		default: return ("CGI Response");
+static void	buildCgiHttpResponse(std::string& cgiOutput) {
+	std::size_t	sep = cgiOutput.find("\r\n\r\n");
+	std::size_t	sepLen = 4;
+	if (sep == std::string::npos) {
+		sep = cgiOutput.find("\n\n");
+		sepLen = 2;
 	}
-}
 
-static std::string	buildCgiHttpResponseHeader(const Client& client,
-		const std::string& headerBlock, std::size_t bodySize) {
-	int	status = HTTP_OK;
-	std::string	reason = _defaultCgiReason(status);
+	std::string	headerBlock;
+	std::size_t	bodyOffset = 0;
+	if (sep != std::string::npos) {
+		headerBlock = cgiOutput.substr(0, sep);
+		bodyOffset = sep + sepLen;
+	}
+
+	int	status = 200;
+	std::string	reason = "OK";
 	std::string	outHeaders;
+
 	std::stringstream	hs(headerBlock);
 	std::string	line;
-
 	while (std::getline(hs, line)) {
 		if (!line.empty() && line[line.size() - 1] == '\r')
 			line.erase(line.size() - 1);
 		if (line.empty())
 			continue;
 
-		const std::size_t	colon = line.find(':');
-		if (colon == std::string::npos || colon == 0)
-			continue;
-		std::string	key = line.substr(0, colon);
-		while (!key.empty() && (key[key.size() - 1] == ' ' || key[key.size() - 1] == '\t'))
-			key.erase(key.size() - 1);
-		key = _toLower(key);
+		std::string	lower = line;
+		for (std::size_t i = 0; i < lower.size(); ++i)
+			lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lower[i])));
 
-		if (key == "status") {
-			int	parsedStatus = 0;
-			std::string	parsedReason;
-			std::stringstream	ss(line.substr(colon + 1));
-			ss >> parsedStatus;
-			if (parsedStatus >= 100 && parsedStatus <= 599) {
-				status = parsedStatus;
-				ss >> std::ws;
-				std::getline(ss, parsedReason);
-				reason = parsedReason.empty() ? _defaultCgiReason(status) : parsedReason;
-			}
-		} else if (key != "content-length" && key != "transfer-encoding"
-			&& key != "connection") {
+		if (lower.size() >= 7 && lower.substr(0, 7) == "status:") {
+			std::stringstream	ss(line.substr(7));
+			ss >> status >> std::ws;
+			std::getline(ss, reason);
+		} else {
 			outHeaders += line;
 			outHeaders += "\r\n";
 		}
 	}
 
-	std::string	version = client.request.getHttpVersion();
-	if (version != "HTTP/1.0" && version != "HTTP/1.1")
-		version = "HTTP/1.1";
 	std::stringstream	resp;
-	resp << version << " " << status << " " << reason << "\r\n";
+	resp << "HTTP/1.1 " << status << " " << reason << "\r\n";
 	resp << outHeaders;
-	resp << "Content-Length: " << bodySize << "\r\n";
+	resp << "Content-Length: "
+		<< static_cast<long>(cgiOutput.size() - bodyOffset) << "\r\n";
 	resp << "Connection: close\r\n\r\n";
-	return (resp.str());
-}
 
-static bool	_writeAllToFd(int fd, const char* data, std::size_t size) {
-	std::size_t	written = 0;
-
-	while (written < size) {
-		const ssize_t	result = write(fd, data + written, size - written);
-		if (result > 0) {
-			written += static_cast<std::size_t>(result);
-			continue;
-		}
-		if (result == -1 && errno == EINTR)
-			continue;
-		return (false);
-	}
-	return (true);
+	cgiOutput.erase(0, bodyOffset);
+	cgiOutput.insert(0, resp.str());
 }
 
 size_t	ListenAndAcceptReqs::_getMaxBodySize(int port) const
@@ -238,74 +192,17 @@ void	ListenAndAcceptReqs::_releaseClientResources(Client& client)
 
 	if (client.cgiPid > 0)
 	{
-		const pid_t	pid = client.cgiPid;
-		cgiPidToClientFd.erase(pid);
-		kill(pid, SIGKILL);
-		while (waitpid(pid, NULL, 0) == -1 && errno == EINTR)
+		kill(client.cgiPid, SIGKILL);
+		while (waitpid(client.cgiPid, NULL, 0) == -1 && errno == EINTR)
 			;
 		client.cgiPid = -1;
-	}
-	_releaseCgiSlot(client);
-
-	if (client.cgiBodyFd != -1)
-	{
-		close(client.cgiBodyFd);
-		client.cgiBodyFd = -1;
-	}
-	if (client.cgiBodyWriteFd != -1)
-	{
-		close(client.cgiBodyWriteFd);
-		client.cgiBodyWriteFd = -1;
 	}
 
 	file.closeFile(client.clientFd);
 	client.requestBodyFd = -1;
-	client.requestBodyPath.clear();
-	client.cgiBytesReceived = 0;
-	client.cgiBodyRemaining = 0;
-	std::string().swap(client.cgiBodyBuffer);
-	client.cgiBodyBufferOffset = 0;
-	client.cgiState = CGI_NONE;
-}
-
-void	ListenAndAcceptReqs::_reapCgiChildren()
-{
-	while (true)
-	{
-		const pid_t	pid = waitpid(-1, NULL, WNOHANG);
-		if (pid > 0)
-		{
-			std::map<pid_t, int>::iterator	pit = cgiPidToClientFd.find(pid);
-			if (pit == cgiPidToClientFd.end())
-				continue;
-			std::map<int, Client>::iterator	cit = clients.find(pit->second);
-			if (cit != clients.end() && cit->second.cgiPid == pid)
-			{
-				cit->second.cgiPid = -1;
-				_releaseCgiSlot(cit->second);
-			}
-			cgiPidToClientFd.erase(pit);
-			continue;
-		}
-		if (pid == -1 && errno == EINTR)
-			continue;
-		break;
-	}
-}
-
-void	ListenAndAcceptReqs::_refreshTimeout(int fd, int tour,
-		std::map<int, int>& fdTargetTour,
-		std::vector<std::vector<int> >& timerWheel)
-{
-	if (clients.find(fd) == clients.end())
-		return;
-	const int	newTour = (tour + TIME_OUT) % MAX_TOUR;
-	std::map<int, int>::iterator	it = fdTargetTour.find(fd);
-	if (it == fdTargetTour.end() || it->second != newTour)
-	{
-		timerWheel[newTour].push_back(fd);
-		fdTargetTour[fd] = newTour;
-	}
+	client.cgiActive = false;
+	client.cgiQueued = false;
+	_releaseCgiSlot(client);
 }
 
 void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour)
@@ -334,10 +231,8 @@ bool	ListenAndAcceptReqs::_sendErrorAndMod(int fd, Client& client, int code)
 	}
 
 	Response	resp = Response::error(code, *defServer);
-	resp.setHttpVersion(client.request.getHttpVersion());
 	client.response = resp.serialize();
 	client.responseOffset = 0;
-	client.cgiState = CGI_NONE;
 
 	struct epoll_event	modEvent;
 	modEvent.data.fd = fd;
@@ -355,191 +250,66 @@ void	ListenAndAcceptReqs::_startQueuedCgis(int tour,
 	{
 		const int	clientFd = pendingCgiClients.front();
 		pendingCgiClients.pop_front();
-		std::map<int, Client>::iterator	cit = clients.find(clientFd);
-		if (cit == clients.end() || cit->second.cgiState != CGI_QUEUED)
+		std::map<int, Client>::iterator	it = clients.find(clientFd);
+		if (it == clients.end() || !it->second.cgiQueued)
 			continue;
 
-		Client&	client = cit->second;
+		Client&	client = it->second;
 		RequestHandler::startCgi(client, config, client.port);
-		if (client.cgiState != CGI_RUNNING)
+		if (client.cgiActive)
 		{
-			if (!_sendErrorAndMod(clientFd, client, HTTP_INTERNAL_SERVER_ERROR))
-				cleanupClient(clientFd, fdTargetTour);
+			client.cgiSlotHeld = true;
+			++activeCgiCount;
+
+			struct epoll_event	cgiEvent;
+			cgiEvent.events = EPOLLIN;
+			cgiEvent.data.fd = client.cgiOutFd;
+			if (epoll_ctl(epollFd, EPOLL_CTL_ADD, client.cgiOutFd,
+				&cgiEvent) == -1)
+			{
+				_releaseClientResources(client);
+				if (!_sendErrorAndMod(clientFd, client,
+					HTTP_INTERNAL_SERVER_ERROR))
+				{
+					cleanupClient(clientFd, fdTargetTour);
+					continue;
+				}
+			}
 			else
-				_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
-			continue;
+			{
+				cgiReadFdToClientFd[client.cgiOutFd] = clientFd;
+				file.closeFile(clientFd);
+				client.requestBodyFd = -1;
+				client.requestBodyPath.clear();
+				std::string().swap(client.requestBody);
+			}
 		}
-
-		client.cgiSlotHeld = true;
-		++activeCgiCount;
-		cgiPidToClientFd[client.cgiPid] = clientFd;
-
-		struct epoll_event	cgiEvent;
-		cgiEvent.events = EPOLLIN;
-		cgiEvent.data.fd = client.cgiOutFd;
-		if (epoll_ctl(epollFd, EPOLL_CTL_ADD, client.cgiOutFd, &cgiEvent) == -1)
+		else
 		{
-			_releaseClientResources(client);
-			if (!_sendErrorAndMod(clientFd, client, HTTP_INTERNAL_SERVER_ERROR))
+			struct epoll_event	writeEvent;
+			writeEvent.events = EPOLLOUT;
+			writeEvent.data.fd = clientFd;
+			if (epoll_ctl(epollFd, EPOLL_CTL_MOD, clientFd,
+				&writeEvent) == -1)
+			{
 				cleanupClient(clientFd, fdTargetTour);
-			else
-				_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
-			continue;
+				continue;
+			}
 		}
-		cgiReadFdToClientFd[client.cgiOutFd] = clientFd;
 
-		file.closeFile(clientFd);
-		client.requestBodyFd = -1;
-		client.requestBodyPath.clear();
-		std::string().swap(client.requestBody);
-
-		struct epoll_event	waitEvent;
-		waitEvent.events = 0;
-		waitEvent.data.fd = clientFd;
-		if (epoll_ctl(epollFd, EPOLL_CTL_MOD, clientFd, &waitEvent) == -1)
-		{
-			cleanupClient(clientFd, fdTargetTour);
-			continue;
-		}
-		_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
+		const int	newTour = (tour + TIME_OUT) % MAX_TOUR;
+		timerWheel[newTour].push_back(clientFd);
+		fdTargetTour[clientFd] = newTour;
 	}
 }
 
-bool	ListenAndAcceptReqs::_prepareCgiResponse(Client& client)
-{
-	if (client.cgiBodyFd == -1 || client.cgiBytesReceived == 0)
-		return (false);
-
-	std::size_t	prefixSize = client.cgiBytesReceived;
-	if (prefixSize > MAX_CGI_HEADER_SIZE + 4)
-		prefixSize = MAX_CGI_HEADER_SIZE + 4;
-	std::string	prefix;
-	char	buffer[4096];
-	while (prefix.size() < prefixSize)
-	{
-		std::size_t	toRead = prefixSize - prefix.size();
-		if (toRead > sizeof(buffer))
-			toRead = sizeof(buffer);
-		const ssize_t	count = read(client.cgiBodyFd, buffer, toRead);
-		if (count > 0)
-		{
-			prefix.append(buffer, static_cast<std::size_t>(count));
-			continue;
-		}
-		if (count == -1 && errno == EINTR)
-			continue;
-		return (false);
-	}
-
-	std::size_t	separator = prefix.find("\r\n\r\n");
-	std::size_t	separatorLength = 4;
-	const std::size_t	lfSeparator = prefix.find("\n\n");
-	if (separator == std::string::npos
-		|| (lfSeparator != std::string::npos && lfSeparator < separator))
-	{
-		separator = lfSeparator;
-		separatorLength = 2;
-	}
-
-	std::size_t	bodyOffset = 0;
-	std::string	headerBlock;
-	if (separator != std::string::npos && separator <= MAX_CGI_HEADER_SIZE)
-	{
-		headerBlock = prefix.substr(0, separator);
-		bodyOffset = separator + separatorLength;
-	}
-	if (bodyOffset > client.cgiBytesReceived || bodyOffset > prefix.size())
-		return (false);
-
-	client.cgiBodyRemaining = client.cgiBytesReceived - bodyOffset;
-	client.response = buildCgiHttpResponseHeader(client, headerBlock,
-		client.cgiBodyRemaining);
-	client.responseOffset = 0;
-	client.cgiBodyBuffer = prefix.substr(bodyOffset);
-	client.cgiBodyBufferOffset = 0;
-	client.cgiState = CGI_SENDING_RESPONSE;
-	return (true);
-}
-
-int	ListenAndAcceptReqs::_sendClientData(Client& client)
-{
-	bool	progress = false;
-
-	if (client.responseOffset < client.response.size())
-	{
-		ssize_t	sent;
-		do
-		{
-			sent = send(client.clientFd,
-				client.response.data() + client.responseOffset,
-				client.response.size() - client.responseOffset, 0);
-		}
-		while (sent == -1 && errno == EINTR);
-		if (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-			return (SEND_PENDING);
-		if (sent <= 0)
-			return (SEND_FAILED);
-		client.responseOffset += static_cast<std::size_t>(sent);
-		progress = true;
-		if (client.responseOffset < client.response.size())
-			return (SEND_PROGRESS);
-	}
-
-	if (client.cgiState != CGI_SENDING_RESPONSE)
-		return (SEND_COMPLETE);
-	if (client.cgiBodyRemaining == 0)
-		return (SEND_COMPLETE);
-
-	if (client.cgiBodyBufferOffset >= client.cgiBodyBuffer.size())
-	{
-		std::size_t	toRead = client.cgiBodyRemaining;
-		if (toRead > CGI_IO_BUFFER_SIZE)
-			toRead = CGI_IO_BUFFER_SIZE;
-		char	buffer[CGI_IO_BUFFER_SIZE];
-		ssize_t	count;
-		do
-		{
-			count = read(client.cgiBodyFd, buffer, toRead);
-		}
-		while (count == -1 && errno == EINTR);
-		if (count <= 0)
-			return (SEND_FAILED);
-		client.cgiBodyBuffer.assign(buffer, static_cast<std::size_t>(count));
-		client.cgiBodyBufferOffset = 0;
-	}
-
-	ssize_t	sent;
-	do
-	{
-		sent = send(client.clientFd,
-			client.cgiBodyBuffer.data() + client.cgiBodyBufferOffset,
-			client.cgiBodyBuffer.size() - client.cgiBodyBufferOffset, 0);
-	}
-	while (sent == -1 && errno == EINTR);
-	if (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-		return (progress ? SEND_PROGRESS : SEND_PENDING);
-	if (sent <= 0)
-		return (SEND_FAILED);
-	client.cgiBodyBufferOffset += static_cast<std::size_t>(sent);
-	if (client.cgiBodyBufferOffset < client.cgiBodyBuffer.size())
-		return (SEND_PROGRESS);
-	if (client.cgiBodyBuffer.size() > client.cgiBodyRemaining)
-		return (SEND_FAILED);
-	client.cgiBodyRemaining -= client.cgiBodyBuffer.size();
-	client.cgiBodyBuffer.clear();
-	client.cgiBodyBufferOffset = 0;
-	return (client.cgiBodyRemaining == 0 ? SEND_COMPLETE : SEND_PROGRESS);
-}
-
-void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, int tour,
-		std::map<int, int>& fdTargetTour,
-		std::vector<std::vector<int> >& timerWheel)
+void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour)
 {
 	std::map<int, int>::iterator	it = cgiReadFdToClientFd.find(cgiFd);
 	if (it == cgiReadFdToClientFd.end())
 		return;
 
-	const int	clientFd = it->second;
+	int	clientFd = it->second;
 	std::map<int, Client>::iterator	cit = clients.find(clientFd);
 	if (cit == clients.end())
 	{
@@ -548,73 +318,66 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, int tour,
 		close(cgiFd);
 		return;
 	}
-	Client&	client = cit->second;
-	char	buffer[CGI_IO_BUFFER_SIZE];
 
-	while (true)
+	Client&	client = cit->second;
+
+	char	buf[4096];
+	ssize_t	n = read(cgiFd, buf, sizeof(buf));
+	if (n == -1)
 	{
-		const ssize_t	count = read(cgiFd, buffer, sizeof(buffer));
-		if (count > 0)
-		{
-			const std::size_t	amount = static_cast<std::size_t>(count);
-			if (client.cgiBytesReceived > MAX_CGI_RESPONSE_SIZE
-				|| amount > MAX_CGI_RESPONSE_SIZE - client.cgiBytesReceived
-				|| !_writeAllToFd(client.cgiBodyWriteFd, buffer, amount))
-			{
-				_releaseClientResources(client);
-				if (!_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY))
-					cleanupClient(clientFd, fdTargetTour);
-				else
-					_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
-				return;
-			}
-			client.cgiBytesReceived += amount;
-			_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
-			continue;
-		}
-		if (count == -1 && errno == EINTR)
-			continue;
-		if (count == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+		if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
 			return;
-		if (count == -1)
-		{
+		epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+		cgiReadFdToClientFd.erase(cgiFd);
+		close(cgiFd);
+		client.cgiOutFd = -1;
+		_releaseClientResources(client);
+		_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
+		return;
+	}
+
+	if (n > 0)
+	{
+		if (client.cgiResponse.size() + static_cast<std::size_t>(n) > MAX_CGI_RESPONSE_SIZE) {
+			epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+			cgiReadFdToClientFd.erase(cgiFd);
+			close(cgiFd);
+			client.cgiOutFd = -1;
 			_releaseClientResources(client);
-			if (!_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY))
-				cleanupClient(clientFd, fdTargetTour);
-			else
-				_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
+			_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
 			return;
 		}
-		break;
+		client.cgiResponse.append(buf, static_cast<std::size_t>(n));
+		return;
 	}
 
 	epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
 	cgiReadFdToClientFd.erase(cgiFd);
 	close(cgiFd);
 	client.cgiOutFd = -1;
-	if (client.cgiBodyWriteFd != -1)
-	{
-		close(client.cgiBodyWriteFd);
-		client.cgiBodyWriteFd = -1;
-	}
 
-	if (!_prepareCgiResponse(client))
+	if (client.cgiPid > 0
+		&& waitpid(client.cgiPid, NULL, WNOHANG) == client.cgiPid)
+		client.cgiPid = -1;
+
+	if (client.cgiResponse.empty())
 	{
-		_releaseClientResources(client);
-		if (!_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY))
-			cleanupClient(clientFd, fdTargetTour);
-		else
-			_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
+		client.cgiActive = false;
+		_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
 		return;
 	}
 
-	struct epoll_event	writeEvent;
-	writeEvent.data.fd = clientFd;
-	writeEvent.events = EPOLLOUT;
-	if (epoll_ctl(epollFd, EPOLL_CTL_MOD, clientFd, &writeEvent) == -1)
+	buildCgiHttpResponse(client.cgiResponse);
+	client.response.swap(client.cgiResponse);
+	client.responseOffset = 0;
+	client.cgiActive = false;
+	client.cgiResponse.clear();
+
+	struct epoll_event	modEvent;
+	modEvent.data.fd = clientFd;
+	modEvent.events = EPOLLOUT;
+	if (epoll_ctl(epollFd, EPOLL_CTL_MOD, clientFd, &modEvent) == -1)
 		cleanupClient(clientFd, fdTargetTour);
-	else
-		_refreshTimeout(clientFd, tour, fdTargetTour, timerWheel);
 }
 
 void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequested)
@@ -666,7 +429,6 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 			}
 			timerWheel[tour].clear();
 		}
-		_reapCgiChildren();
 		_startQueuedCgis(tour, fdTargetTour, timerWheel);
 
 		int	readyNum = epoll_wait(epollFd, &epollEvents[0], BUFFER_SIZE, 1000);
@@ -689,7 +451,7 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 						continue ;
 					if (cgiReadFdToClientFd.count(currentFd))
 					{
-						_handleCgiRead(currentFd, tour, fdTargetTour, timerWheel);
+						_handleCgiRead(currentFd, fdTargetTour);
 						continue ;
 					}
 					cleanupClient(currentFd, fdTargetTour);
@@ -758,7 +520,7 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 				if (cgiReadFdToClientFd.count(currentFd))
 				{
 					if (epollEvents.at(i).events & EPOLLIN)
-						_handleCgiRead(currentFd, tour, fdTargetTour, timerWheel);
+						_handleCgiRead(currentFd, fdTargetTour);
 					continue ;
 				}
 				if (clients.find(currentFd) == clients.end())
@@ -769,26 +531,27 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					int	update = 0;
 					bool disconnect = false;
 
-					const int result = Request::readFd(clients[currentFd], file, _getMaxBodySize(clients[currentFd].port));
-					if (!result && !Request::getErrno())
-					{
-						update = 1;
-						RequestHandler::handle(clients[currentFd], config, clients[currentFd].port);
+				const int result = Request::readFd(clients[currentFd], file, _getMaxBodySize(clients[currentFd].port));
+				if (!result && !Request::getErrno())
+				{
+					update = 1;
+					RequestHandler::handle(clients[currentFd], config, clients[currentFd].port);
 
-						struct epoll_event modEvent;
-						modEvent.data.fd = currentFd;
-						if (clients[currentFd].cgiState == CGI_QUEUED)
-						{
-							pendingCgiClients.push_back(currentFd);
-							fdTargetTour.erase(currentFd);
-							modEvent.events = 0;
-							update = 0;
-						}
-						else
-							modEvent.events = EPOLLOUT;
-						if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd, &modEvent) == -1)
-							disconnect = true;
+					struct epoll_event modEvent;
+					modEvent.data.fd = currentFd;
+					if (clients[currentFd].cgiQueued)
+					{
+						pendingCgiClients.push_back(currentFd);
+						fdTargetTour.erase(currentFd);
+						modEvent.events = 0;
+						update = 0;
 					}
+					else
+						modEvent.events = EPOLLOUT;
+					if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd,
+						&modEvent) == -1)
+						disconnect = true;
+				}
 					else if (!result && Request::getErrno() == -1)
 					{
 						disconnect = true;
@@ -839,19 +602,52 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 						continue ;
 					}
 
-					if (update)
-						_refreshTimeout(currentFd, tour, fdTargetTour, timerWheel);
+					int	newTourNum = (tour + TIME_OUT) % MAX_TOUR;
+					if (update &&
+						fdTargetTour[currentFd] != newTourNum)
+					{
+						timerWheel[newTourNum].push_back(currentFd);
+						fdTargetTour[currentFd] = newTourNum;
+					}
 				}
 				else if (epollEvents.at(i).events & EPOLLOUT)
 				{
-					const int	sendResult = _sendClientData(clients[currentFd]);
-					if (sendResult == SEND_FAILED || sendResult == SEND_COMPLETE)
+					Client& client = clients[currentFd];
+					std::string& resp = client.response;
+					if (resp.empty() || client.responseOffset >= resp.size())
 					{
 						cleanupClient(currentFd, fdTargetTour);
 						continue ;
 					}
-					if (sendResult == SEND_PROGRESS)
-						_refreshTimeout(currentFd, tour, fdTargetTour, timerWheel);
+
+					ssize_t sent;
+					do
+					{
+						sent = send(currentFd,
+							resp.data() + client.responseOffset,
+							resp.size() - client.responseOffset, 0);
+					}
+					while (sent == -1 && errno == EINTR);
+					if (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+						continue ;
+					if (sent <= 0)
+					{
+						cleanupClient(currentFd, fdTargetTour);
+						continue ;
+					}
+					client.responseOffset += static_cast<std::size_t>(sent);
+					if (client.responseOffset == resp.size())
+					{
+						cleanupClient(currentFd, fdTargetTour);
+						continue ;
+					}
+
+					int	newTourNum = (tour + TIME_OUT) % MAX_TOUR;
+					if (fdTargetTour[currentFd] != newTourNum)
+					{
+						timerWheel[newTourNum].push_back(currentFd);
+						fdTargetTour[currentFd] = newTourNum;
+					}
 				}
 			}
 		}
