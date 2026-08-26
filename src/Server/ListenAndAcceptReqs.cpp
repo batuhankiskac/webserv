@@ -10,22 +10,11 @@
 #include <string>
 
 static const std::size_t MAX_CGI_RESPONSE_SIZE = 128 * 1024 * 1024;
+static const std::size_t MAX_CGI_HEADER_SIZE = 32 * 1024;
+static const std::size_t CGI_IO_BUFFER_SIZE = 64 * 1024;
 
-static void	buildCgiHttpResponse(std::string& cgiOutput) {
-	std::size_t	sep = cgiOutput.find("\r\n\r\n");
-	std::size_t	sepLen = 4;
-	if (sep == std::string::npos) {
-		sep = cgiOutput.find("\n\n");
-		sepLen = 2;
-	}
-
-	std::string	headerBlock;
-	std::size_t	bodyOffset = 0;
-	if (sep != std::string::npos) {
-		headerBlock = cgiOutput.substr(0, sep);
-		bodyOffset = sep + sepLen;
-	}
-
+static std::string	buildCgiHttpResponseHeader(
+		const std::string& headerBlock, std::size_t bodySize) {
 	int	status = 200;
 	std::string	reason = "OK";
 	std::string	outHeaders;
@@ -38,15 +27,24 @@ static void	buildCgiHttpResponse(std::string& cgiOutput) {
 		if (line.empty())
 			continue;
 
-		std::string	lower = line;
-		for (std::size_t i = 0; i < lower.size(); ++i)
-			lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lower[i])));
+		const std::size_t	colon = line.find(':');
+		if (colon == std::string::npos || colon == 0)
+			continue;
+		std::string	key = line.substr(0, colon);
+		while (!key.empty() && (key[key.size() - 1] == ' '
+			|| key[key.size() - 1] == '\t'))
+			key.erase(key.size() - 1);
+		for (std::size_t i = 0; i < key.size(); ++i)
+			key[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(key[i])));
 
-		if (lower.size() >= 7 && lower.substr(0, 7) == "status:") {
-			std::stringstream	ss(line.substr(7));
+		if (key == "status") {
+			std::stringstream	ss(line.substr(colon + 1));
 			ss >> status >> std::ws;
 			std::getline(ss, reason);
-		} else {
+			if (reason.empty())
+				reason = "CGI Response";
+		} else if (key != "content-length" && key != "transfer-encoding"
+			&& key != "connection") {
 			outHeaders += line;
 			outHeaders += "\r\n";
 		}
@@ -56,11 +54,102 @@ static void	buildCgiHttpResponse(std::string& cgiOutput) {
 	resp << "HTTP/1.1 " << status << " " << reason << "\r\n";
 	resp << outHeaders;
 	resp << "Content-Length: "
-		<< static_cast<long>(cgiOutput.size() - bodyOffset) << "\r\n";
+		<< static_cast<long>(bodySize) << "\r\n";
 	resp << "Connection: close\r\n\r\n";
+	return (resp.str());
+}
 
-	cgiOutput.erase(0, bodyOffset);
-	cgiOutput.insert(0, resp.str());
+static void	closeCgiSpool(CgiSpoolState& spool) {
+	if (spool.readFd != -1)
+		close(spool.readFd);
+	if (spool.writeFd != -1)
+		close(spool.writeFd);
+	spool.readFd = -1;
+	spool.writeFd = -1;
+	spool.bytesReceived = 0;
+	spool.bodyRemaining = 0;
+}
+
+static bool	writeAllToFile(int fd, const char* data, std::size_t size) {
+	std::size_t	written = 0;
+	while (written < size) {
+		const ssize_t	count = write(fd, data + written, size - written);
+		if (count == -1 && errno == EINTR)
+			continue;
+		if (count <= 0)
+			return (false);
+		written += static_cast<std::size_t>(count);
+	}
+	return (true);
+}
+
+static bool	prepareCgiResponse(Client& client) {
+	if (client.cgiSpool.readFd == -1 || client.cgiSpool.bytesReceived == 0)
+		return (false);
+
+	std::size_t	prefixSize = client.cgiSpool.bytesReceived;
+	if (prefixSize > MAX_CGI_HEADER_SIZE + 4)
+		prefixSize = MAX_CGI_HEADER_SIZE + 4;
+
+	std::string	prefix;
+	char	buffer[4096];
+	while (prefix.size() < prefixSize) {
+		std::size_t	toRead = prefixSize - prefix.size();
+		if (toRead > sizeof(buffer))
+			toRead = sizeof(buffer);
+		const ssize_t	count = read(client.cgiSpool.readFd, buffer, toRead);
+		if (count == -1 && errno == EINTR)
+			continue;
+		if (count <= 0)
+			return (false);
+		prefix.append(buffer, static_cast<std::size_t>(count));
+	}
+
+	std::size_t	separator = prefix.find("\r\n\r\n");
+	std::size_t	separatorLength = 4;
+	const std::size_t	lfSeparator = prefix.find("\n\n");
+	if (separator == std::string::npos
+		|| (lfSeparator != std::string::npos && lfSeparator < separator)) {
+		separator = lfSeparator;
+		separatorLength = 2;
+	}
+
+	std::size_t	bodyOffset = 0;
+	std::string	headerBlock;
+	if (separator != std::string::npos && separator <= MAX_CGI_HEADER_SIZE) {
+		headerBlock = prefix.substr(0, separator);
+		bodyOffset = separator + separatorLength;
+	}
+	if (bodyOffset > client.cgiSpool.bytesReceived || bodyOffset > prefix.size())
+		return (false);
+
+	client.response = buildCgiHttpResponseHeader(headerBlock,
+		client.cgiSpool.bytesReceived - bodyOffset);
+	client.response.append(prefix, bodyOffset, prefix.size() - bodyOffset);
+	client.responseOffset = 0;
+	client.cgiSpool.bodyRemaining = client.cgiSpool.bytesReceived - prefix.size();
+	return (true);
+}
+
+static bool	loadNextCgiChunk(Client& client) {
+	if (client.cgiSpool.readFd == -1 || client.cgiSpool.bodyRemaining == 0)
+		return (false);
+
+	std::size_t	toRead = client.cgiSpool.bodyRemaining;
+	if (toRead > CGI_IO_BUFFER_SIZE)
+		toRead = CGI_IO_BUFFER_SIZE;
+	char	buffer[CGI_IO_BUFFER_SIZE];
+	ssize_t	count;
+	do {
+		count = read(client.cgiSpool.readFd, buffer, toRead);
+	} while (count == -1 && errno == EINTR);
+	if (count <= 0 || static_cast<std::size_t>(count) > client.cgiSpool.bodyRemaining)
+		return (false);
+
+	client.response.assign(buffer, static_cast<std::size_t>(count));
+	client.responseOffset = 0;
+	client.cgiSpool.bodyRemaining -= static_cast<std::size_t>(count);
+	return (true);
 }
 
 size_t	ListenAndAcceptReqs::_getMaxBodySize(int port) const
@@ -188,6 +277,8 @@ void	ListenAndAcceptReqs::_releaseClientResources(Client& client)
 		client.cgiPid = -1;
 	}
 
+	closeCgiSpool(client.cgiSpool);
+
 	file.closeFile(client.clientFd);
 	client.requestBodyFd = -1;
 	client.cgiActive = false;
@@ -248,7 +339,7 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 
 	Client&	client = cit->second;
 
-	char	buf[4096];
+	char	buf[CGI_IO_BUFFER_SIZE];
 	ssize_t	n = read(cgiFd, buf, sizeof(buf));
 	if (n == -1)
 	{
@@ -259,22 +350,36 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 		close(cgiFd);
 		client.cgiOutFd = -1;
 		_releaseClientResources(client);
-		_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
+		if (!_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY))
+			cleanupClient(clientFd, fdTargetTour);
 		return;
 	}
 
 	if (n > 0)
 	{
-		if (client.cgiResponse.size() + static_cast<std::size_t>(n) > MAX_CGI_RESPONSE_SIZE) {
+		const std::size_t	amount = static_cast<std::size_t>(n);
+		if (client.cgiSpool.bytesReceived > MAX_CGI_RESPONSE_SIZE
+			|| amount > MAX_CGI_RESPONSE_SIZE - client.cgiSpool.bytesReceived) {
 			epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
 			cgiReadFdToClientFd.erase(cgiFd);
 			close(cgiFd);
 			client.cgiOutFd = -1;
 			_releaseClientResources(client);
-			_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
+			if (!_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY))
+				cleanupClient(clientFd, fdTargetTour);
 			return;
 		}
-		client.cgiResponse.append(buf, static_cast<std::size_t>(n));
+		if (!writeAllToFile(client.cgiSpool.writeFd, buf, amount)) {
+			epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
+			cgiReadFdToClientFd.erase(cgiFd);
+			close(cgiFd);
+			client.cgiOutFd = -1;
+			_releaseClientResources(client);
+			if (!_sendErrorAndMod(clientFd, client, HTTP_INTERNAL_SERVER_ERROR))
+				cleanupClient(clientFd, fdTargetTour);
+			return;
+		}
+		client.cgiSpool.bytesReceived += amount;
 		return;
 	}
 
@@ -282,23 +387,30 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 	cgiReadFdToClientFd.erase(cgiFd);
 	close(cgiFd);
 	client.cgiOutFd = -1;
+	if (client.cgiSpool.writeFd != -1) {
+		close(client.cgiSpool.writeFd);
+		client.cgiSpool.writeFd = -1;
+	}
 
 	if (client.cgiPid > 0
 		&& waitpid(client.cgiPid, NULL, WNOHANG) == client.cgiPid)
 		client.cgiPid = -1;
 
-	if (client.cgiResponse.empty())
+	if (client.cgiSpool.bytesReceived == 0)
 	{
-		client.cgiActive = false;
-		_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY);
+		_releaseClientResources(client);
+		if (!_sendErrorAndMod(clientFd, client, HTTP_BAD_GATEWAY))
+			cleanupClient(clientFd, fdTargetTour);
 		return;
 	}
 
-	buildCgiHttpResponse(client.cgiResponse);
-	client.response.swap(client.cgiResponse);
-	client.responseOffset = 0;
+	if (!prepareCgiResponse(client)) {
+		_releaseClientResources(client);
+		if (!_sendErrorAndMod(clientFd, client, HTTP_INTERNAL_SERVER_ERROR))
+			cleanupClient(clientFd, fdTargetTour);
+		return;
+	}
 	client.cgiActive = false;
-	client.cgiResponse.clear();
 
 	struct epoll_event	modEvent;
 	modEvent.data.fd = clientFd;
@@ -584,7 +696,22 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					client.responseOffset += static_cast<std::size_t>(sent);
 					if (client.responseOffset == resp.size())
 					{
-						cleanupClient(currentFd, fdTargetTour);
+						if (client.cgiSpool.bodyRemaining == 0)
+						{
+							cleanupClient(currentFd, fdTargetTour);
+							continue ;
+						}
+						if (!loadNextCgiChunk(client))
+						{
+							cleanupClient(currentFd, fdTargetTour);
+							continue ;
+						}
+						int	newTourNum = (tour + TIME_OUT) % MAX_TOUR;
+						if (fdTargetTour[currentFd] != newTourNum)
+						{
+							timerWheel[newTourNum].push_back(currentFd);
+							fdTargetTour[currentFd] = newTourNum;
+						}
 						continue ;
 					}
 

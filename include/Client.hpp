@@ -15,6 +15,21 @@ enum RequestState
 	REQUEST_COMPLETE
 };
 
+struct CgiSpoolState
+{
+	int			readFd;
+	int			writeFd;
+	std::size_t	bytesReceived;
+	std::size_t	bodyRemaining;
+
+	CgiSpoolState() :
+		readFd(-1),
+		writeFd(-1),
+		bytesReceived(0),
+		bodyRemaining(0)
+	{}
+};
+
 struct Client
 {
 	int			clientFd;
@@ -38,7 +53,7 @@ struct Client
 
 	int			cgiOutFd;
 	pid_t		cgiPid;
-	std::string	cgiResponse;
+	CgiSpoolState	cgiSpool;
 	bool		cgiActive;
 
 	Client();

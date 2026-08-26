@@ -64,6 +64,55 @@ static std::string	_sizeToString(size_t n) {
 	return (ss.str());
 }
 
+static void	_closeCgiSpool(CgiSpoolState& spool) {
+	if (spool.readFd != -1)
+		close(spool.readFd);
+	if (spool.writeFd != -1)
+		close(spool.writeFd);
+	spool.readFd = -1;
+	spool.writeFd = -1;
+	spool.bytesReceived = 0;
+	spool.bodyRemaining = 0;
+}
+
+static bool	_openCgiSpool(CgiSpoolState& spool, int clientFd) {
+	static unsigned long	counter = 0;
+
+	_closeCgiSpool(spool);
+	for (int attempt = 0; attempt < 128; ++attempt) {
+		std::stringstream	path;
+		path << "/var/tmp/webserv_cgi_output_"
+			<< static_cast<unsigned long>(std::time(NULL)) << "_"
+			<< clientFd << "_" << ++counter;
+		const std::string	name = path.str();
+
+		int writeFd = open(name.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (writeFd == -1) {
+			if (errno == EEXIST)
+				continue;
+			return (false);
+		}
+		int readFd = open(name.c_str(), O_RDONLY);
+		if (readFd == -1 || std::remove(name.c_str()) != 0) {
+			if (readFd != -1)
+				close(readFd);
+			close(writeFd);
+			std::remove(name.c_str());
+			return (false);
+		}
+		if (fcntl(readFd, F_SETFD, FD_CLOEXEC) == -1
+			|| fcntl(writeFd, F_SETFD, FD_CLOEXEC) == -1) {
+			close(readFd);
+			close(writeFd);
+			return (false);
+		}
+		spool.readFd = readFd;
+		spool.writeFd = writeFd;
+		return (true);
+	}
+	return (false);
+}
+
 static std::string	_buildAllowHeaderValue(const std::vector<std::string>& allowed) {
 	if (allowed.empty())
 		return ("GET");
@@ -436,6 +485,15 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 	char** envp = _buildCgiEnv(client, server, loc, reqPath, envStorage);
 	std::string physicalPath = _joinLocationPath(loc, reqPath);
 	std::string cgiPath = loc.getCgiPath();
+	if (!_openCgiSpool(client.cgiSpool, client.clientFd)) {
+		delete[] envp;
+		close(cgiOut[0]);
+		close(cgiOut[1]);
+		if (stdinFd != -1 && stdinFd != client.requestBodyFd)
+			close(stdinFd);
+		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+		return;
+	}
 
 	pid_t pid = fork();
 	if (pid == -1) {
@@ -444,6 +502,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		close(cgiOut[1]);
 		if (stdinFd != -1 && stdinFd != client.requestBodyFd)
 			close(stdinFd);
+		_closeCgiSpool(client.cgiSpool);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
@@ -456,6 +515,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 			dup2(stdinFd, STDIN_FILENO);
 			close(stdinFd);
 		}
+		_closeCgiSpool(client.cgiSpool);
 		char* argv[3];
 		argv[0] = const_cast<char*>(cgiPath.c_str());
 		argv[1] = const_cast<char*>(physicalPath.c_str());
@@ -474,7 +534,6 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 
 	client.cgiOutFd = cgiOut[0];
 	client.cgiPid = pid;
-	client.cgiResponse.clear();
 	client.cgiActive = true;
 }
 
