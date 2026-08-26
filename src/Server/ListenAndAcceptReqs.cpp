@@ -10,7 +10,6 @@
 #include <string>
 
 static const std::size_t MAX_CGI_RESPONSE_SIZE = 128 * 1024 * 1024;
-static const std::size_t MAX_ACTIVE_CGI = 4;
 
 static void	buildCgiHttpResponse(std::string& cgiOutput) {
 	std::size_t	sep = cgiOutput.find("\r\n\r\n");
@@ -94,7 +93,7 @@ size_t	ListenAndAcceptReqs::_getMaxBodySize(int port) const
 
 ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
 		File& file, const WebservConfig& config)
-	: epollFd(-1), activeCgiCount(0), file(file), config(config)
+	: epollFd(-1), file(file), config(config)
 {
 	if (servers.empty())
 		throw (ListenAndAcceptReqs::ListenOrAcceptionError());
@@ -170,15 +169,6 @@ const char* ListenAndAcceptReqs::ListenOrAcceptionError::what() const throw()
 	return (std::strerror(_errno));
 }
 
-void	ListenAndAcceptReqs::_releaseCgiSlot(Client& client)
-{
-	if (!client.cgiSlotHeld)
-		return;
-	client.cgiSlotHeld = false;
-	if (activeCgiCount > 0)
-		--activeCgiCount;
-}
-
 void	ListenAndAcceptReqs::_releaseClientResources(Client& client)
 {
 	if (client.cgiOutFd != -1)
@@ -201,8 +191,6 @@ void	ListenAndAcceptReqs::_releaseClientResources(Client& client)
 	file.closeFile(client.clientFd);
 	client.requestBodyFd = -1;
 	client.cgiActive = false;
-	client.cgiQueued = false;
-	_releaseCgiSlot(client);
 }
 
 void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour)
@@ -240,67 +228,6 @@ bool	ListenAndAcceptReqs::_sendErrorAndMod(int fd, Client& client, int code)
 	if (epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &modEvent) == -1)
 		return (false);
 	return (true);
-}
-
-void	ListenAndAcceptReqs::_startQueuedCgis(int tour,
-		std::map<int, int>& fdTargetTour,
-		std::vector<std::vector<int> >& timerWheel)
-{
-	while (activeCgiCount < MAX_ACTIVE_CGI && !pendingCgiClients.empty())
-	{
-		const int	clientFd = pendingCgiClients.front();
-		pendingCgiClients.pop_front();
-		std::map<int, Client>::iterator	it = clients.find(clientFd);
-		if (it == clients.end() || !it->second.cgiQueued)
-			continue;
-
-		Client&	client = it->second;
-		RequestHandler::startCgi(client, config, client.port);
-		if (client.cgiActive)
-		{
-			client.cgiSlotHeld = true;
-			++activeCgiCount;
-
-			struct epoll_event	cgiEvent;
-			cgiEvent.events = EPOLLIN;
-			cgiEvent.data.fd = client.cgiOutFd;
-			if (epoll_ctl(epollFd, EPOLL_CTL_ADD, client.cgiOutFd,
-				&cgiEvent) == -1)
-			{
-				_releaseClientResources(client);
-				if (!_sendErrorAndMod(clientFd, client,
-					HTTP_INTERNAL_SERVER_ERROR))
-				{
-					cleanupClient(clientFd, fdTargetTour);
-					continue;
-				}
-			}
-			else
-			{
-				cgiReadFdToClientFd[client.cgiOutFd] = clientFd;
-				file.closeFile(clientFd);
-				client.requestBodyFd = -1;
-				client.requestBodyPath.clear();
-				std::string().swap(client.requestBody);
-			}
-		}
-		else
-		{
-			struct epoll_event	writeEvent;
-			writeEvent.events = EPOLLOUT;
-			writeEvent.data.fd = clientFd;
-			if (epoll_ctl(epollFd, EPOLL_CTL_MOD, clientFd,
-				&writeEvent) == -1)
-			{
-				cleanupClient(clientFd, fdTargetTour);
-				continue;
-			}
-		}
-
-		const int	newTour = (tour + TIME_OUT) % MAX_TOUR;
-		timerWheel[newTour].push_back(clientFd);
-		fdTargetTour[clientFd] = newTour;
-	}
 }
 
 void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour)
@@ -429,7 +356,6 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 			}
 			timerWheel[tour].clear();
 		}
-		_startQueuedCgis(tour, fdTargetTour, timerWheel);
 
 		int	readyNum = epoll_wait(epollFd, &epollEvents[0], BUFFER_SIZE, 1000);
 		if (readyNum == -1)
@@ -537,20 +463,40 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					update = 1;
 					RequestHandler::handle(clients[currentFd], config, clients[currentFd].port);
 
-					struct epoll_event modEvent;
-					modEvent.data.fd = currentFd;
-					if (clients[currentFd].cgiQueued)
+					if (clients[currentFd].cgiActive)
 					{
-						pendingCgiClients.push_back(currentFd);
-						fdTargetTour.erase(currentFd);
-						modEvent.events = 0;
-						update = 0;
+						struct epoll_event cgiEvent;
+						cgiEvent.events = EPOLLIN;
+						cgiEvent.data.fd = clients[currentFd].cgiOutFd;
+						if (epoll_ctl(epollFd, EPOLL_CTL_ADD,
+							clients[currentFd].cgiOutFd, &cgiEvent) == -1)
+							disconnect = true;
+						else
+						{
+							cgiReadFdToClientFd[clients[currentFd].cgiOutFd]
+								= currentFd;
+							file.closeFile(currentFd);
+							clients[currentFd].requestBodyFd = -1;
+							clients[currentFd].requestBodyPath.clear();
+							std::string().swap(clients[currentFd].requestBody);
+
+							struct epoll_event waitEvent;
+							waitEvent.data.fd = currentFd;
+							waitEvent.events = 0;
+							if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd,
+								&waitEvent) == -1)
+								disconnect = true;
+						}
 					}
 					else
-						modEvent.events = EPOLLOUT;
-					if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd,
-						&modEvent) == -1)
-						disconnect = true;
+					{
+						struct epoll_event writeEvent;
+						writeEvent.data.fd = currentFd;
+						writeEvent.events = EPOLLOUT;
+						if (epoll_ctl(epollFd, EPOLL_CTL_MOD, currentFd,
+							&writeEvent) == -1)
+							disconnect = true;
+					}
 				}
 					else if (!result && Request::getErrno() == -1)
 					{

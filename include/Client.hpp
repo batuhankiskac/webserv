@@ -40,8 +40,6 @@ struct Client
 	pid_t		cgiPid;
 	std::string	cgiResponse;
 	bool		cgiActive;
-	bool		cgiQueued;
-	bool		cgiSlotHeld;
 
 	Client();
 	~Client();

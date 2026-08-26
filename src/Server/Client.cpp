@@ -10,9 +10,7 @@ Client::Client() :
 		responseOffset(0),
 		cgiOutFd(-1),
 		cgiPid(-1),
-		cgiActive(false),
-		cgiQueued(false),
-		cgiSlotHeld(false)
+		cgiActive(false)
 {}
 
 Client::~Client()

@@ -617,7 +617,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 	if (!cgiExt.empty() && !cgiPath.empty() &&
 		reqPath.size() >= cgiExt.size() &&
 		reqPath.compare(reqPath.size() - cgiExt.size(), cgiExt.size(), cgiExt) == 0) {
-		client.cgiQueued = true;
+		_handleCgi(client, server, *loc, reqPath);
 		return;
 	}
 
@@ -629,18 +629,4 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		_handleDelete(client, server, *loc, reqPath);
 	else
 		_serveError(client, HTTP_NOT_IMPLEMENTED, server);
-}
-
-void	RequestHandler::startCgi(Client& client, const WebservConfig& config,
-		int port) {
-	client.cgiQueued = false;
-	const ServerBlock&	server = _selectServerBlock(config, port);
-	const std::string	reqPath = client.request.getPath();
-	const LocationBlock*	loc = _selectLocationBlock(server, reqPath);
-
-	if (!loc) {
-		_serveError(client, HTTP_NOT_FOUND, server);
-		return;
-	}
-	_handleCgi(client, server, *loc, reqPath);
 }

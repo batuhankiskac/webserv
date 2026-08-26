@@ -22,7 +22,6 @@ private:
 
 public:
 	static void handle(Client& client, const WebservConfig& config, int port);
-	static void startCgi(Client& client, const WebservConfig& config, int port);
 };
 
 #endif
