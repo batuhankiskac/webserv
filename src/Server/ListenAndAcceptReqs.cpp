@@ -74,8 +74,6 @@ static bool	writeAllToFile(int fd, const char* data, std::size_t size) {
 	std::size_t	written = 0;
 	while (written < size) {
 		const ssize_t	count = write(fd, data + written, size - written);
-		if (count == -1 && errno == EINTR)
-			continue;
 		if (count <= 0)
 			return (false);
 		written += static_cast<std::size_t>(count);
@@ -98,8 +96,6 @@ static bool	prepareCgiResponse(Client& client) {
 		if (toRead > sizeof(buffer))
 			toRead = sizeof(buffer);
 		const ssize_t	count = read(client.cgiSpool.readFd, buffer, toRead);
-		if (count == -1 && errno == EINTR)
-			continue;
 		if (count <= 0)
 			return (false);
 		prefix.append(buffer, static_cast<std::size_t>(count));
@@ -139,10 +135,7 @@ static bool	loadNextCgiChunk(Client& client) {
 	if (toRead > CGI_IO_BUFFER_SIZE)
 		toRead = CGI_IO_BUFFER_SIZE;
 	char	buffer[CGI_IO_BUFFER_SIZE];
-	ssize_t	count;
-	do {
-		count = read(client.cgiSpool.readFd, buffer, toRead);
-	} while (count == -1 && errno == EINTR);
+	ssize_t	count = read(client.cgiSpool.readFd, buffer, toRead);
 	if (count <= 0 || static_cast<std::size_t>(count) > client.cgiSpool.bodyRemaining)
 		return (false);
 
@@ -343,8 +336,6 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 	ssize_t	n = read(cgiFd, buf, sizeof(buf));
 	if (n == -1)
 	{
-		if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-			return;
 		epoll_ctl(epollFd, EPOLL_CTL_DEL, cgiFd, NULL);
 		cgiReadFdToClientFd.erase(cgiFd);
 		close(cgiFd);
@@ -678,16 +669,9 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 						continue ;
 					}
 
-					ssize_t sent;
-					do
-					{
-						sent = send(currentFd,
-							resp.data() + client.responseOffset,
-							resp.size() - client.responseOffset, 0);
-					}
-					while (sent == -1 && errno == EINTR);
-					if (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-						continue ;
+					ssize_t sent = send(currentFd,
+						resp.data() + client.responseOffset,
+						resp.size() - client.responseOffset, 0);
 					if (sent <= 0)
 					{
 						cleanupClient(currentFd, fdTargetTour);
