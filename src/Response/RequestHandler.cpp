@@ -79,38 +79,32 @@ static bool	_openCgiSpool(CgiSpoolState& spool, int clientFd) {
 	static unsigned long	counter = 0;
 
 	_closeCgiSpool(spool);
-	for (int attempt = 0; attempt < 128; ++attempt) {
-		std::stringstream	path;
-		path << "/var/tmp/webserv_cgi_output_"
-			<< static_cast<unsigned long>(std::time(NULL)) << "_"
-			<< clientFd << "_" << ++counter;
-		const std::string	name = path.str();
+	std::stringstream	path;
+	path << "/var/tmp/webserv_cgi_output_"
+		<< static_cast<unsigned long>(std::time(NULL)) << "_"
+		<< clientFd << "_" << ++counter;
+	const std::string	name = path.str();
 
-		int writeFd = open(name.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-		if (writeFd == -1) {
-			if (errno == EEXIST)
-				continue;
-			return (false);
-		}
-		int readFd = open(name.c_str(), O_RDONLY);
-		if (readFd == -1 || std::remove(name.c_str()) != 0) {
-			if (readFd != -1)
-				close(readFd);
-			close(writeFd);
-			std::remove(name.c_str());
-			return (false);
-		}
-		if (fcntl(readFd, F_SETFD, FD_CLOEXEC) == -1
-			|| fcntl(writeFd, F_SETFD, FD_CLOEXEC) == -1) {
+	int writeFd = open(name.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+	if (writeFd == -1)
+		return (false);
+	int readFd = open(name.c_str(), O_RDONLY);
+	if (readFd == -1 || std::remove(name.c_str()) != 0) {
+		if (readFd != -1)
 			close(readFd);
-			close(writeFd);
-			return (false);
-		}
-		spool.readFd = readFd;
-		spool.writeFd = writeFd;
-		return (true);
+		close(writeFd);
+		std::remove(name.c_str());
+		return (false);
 	}
-	return (false);
+	if (fcntl(readFd, F_SETFD, FD_CLOEXEC) == -1
+		|| fcntl(writeFd, F_SETFD, FD_CLOEXEC) == -1) {
+		close(readFd);
+		close(writeFd);
+		return (false);
+	}
+	spool.readFd = readFd;
+	spool.writeFd = writeFd;
+	return (true);
 }
 
 static std::string	_buildAllowHeaderValue(const std::vector<std::string>& allowed) {
@@ -437,7 +431,7 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 
 	if (stdinFd == -1 && !client.requestBody.empty()) {
 		std::stringstream ss;
-		ss << "/tmp/webserv_cgi_" << client.clientFd << "_" << static_cast<long>(std::time(NULL));
+		ss << "/var/tmp/webserv_cgi_" << client.clientFd << "_" << static_cast<long>(std::time(NULL));
 		std::string tmpPath = ss.str();
 		int tempFd = open(tmpPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
 		if (tempFd == -1) {
