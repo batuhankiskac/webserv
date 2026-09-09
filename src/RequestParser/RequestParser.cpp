@@ -186,6 +186,14 @@ long long RequestParser::getContentLength() const {
 	if (val.empty()) {
 		return -1;
 	}
+	if (val.length() > 19) {
+		return -1;
+	}
+	for (size_t i = 0; i < val.length(); ++i) {
+		if (!std::isdigit(static_cast<unsigned char>(val[i]))) {
+			return -1;
+		}
+	}
 	std::stringstream	ss(val);
 	long long	result = -1;
 	ss >> result;

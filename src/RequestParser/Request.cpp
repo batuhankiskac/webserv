@@ -160,6 +160,11 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					{
 						client.state = READING_CHUNKS;
 					}
+					else if (client.contentLength == -1)
+					{
+						_errno = -HTTP_BAD_REQUEST;
+						return (-1);
+					}
 					else if (client.contentLength > 0)
 					{
 						if (client.contentLength > static_cast<long long>(maxBodySize))
