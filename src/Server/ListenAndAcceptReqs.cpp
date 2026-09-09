@@ -8,10 +8,12 @@
 #include <sstream>
 #include <cctype>
 #include <string>
+#include <new>
 
 static const std::size_t MAX_CGI_RESPONSE_SIZE = 128 * 1024 * 1024;
 static const std::size_t MAX_CGI_HEADER_SIZE = 32 * 1024;
 static const std::size_t CGI_IO_BUFFER_SIZE = 64 * 1024;
+static const std::size_t STATIC_IO_BUFFER_SIZE = 64 * 1024;
 
 static std::string	buildCgiHttpResponseHeader(
 		const std::string& headerBlock, std::size_t bodySize) {
@@ -145,32 +147,49 @@ static bool	loadNextCgiChunk(Client& client) {
 	return (true);
 }
 
-size_t	ListenAndAcceptReqs::_getMaxBodySize(int port) const
+static bool	loadNextStaticChunk(Client& client) {
+	if (client.responseFileFd == -1 || client.responseFileRemaining <= 0)
+		return (false);
+
+	std::size_t	toRead = STATIC_IO_BUFFER_SIZE;
+	if (client.responseFileRemaining < static_cast<off_t>(STATIC_IO_BUFFER_SIZE))
+		toRead = static_cast<std::size_t>(client.responseFileRemaining);
+	char	buffer[STATIC_IO_BUFFER_SIZE];
+	const ssize_t	count = read(client.responseFileFd, buffer, toRead);
+	if (count <= 0 || static_cast<off_t>(count) > client.responseFileRemaining)
+		return (false);
+
+	client.response.assign(buffer, static_cast<std::size_t>(count));
+	client.responseOffset = 0;
+	client.responseFileRemaining -= static_cast<off_t>(count);
+	if (client.responseFileRemaining == 0) {
+		close(client.responseFileFd);
+		client.responseFileFd = -1;
+	}
+	return (true);
+}
+
+size_t	ListenAndAcceptReqs::_getMaxBodySize(std::size_t serverBlockIndex) const
 {
 	const std::vector<ServerBlock>&	servers = config.getServers();
-	size_t	maxBodySize = 0;
-	for (std::size_t i = 0; i < servers.size(); ++i)
+	if (serverBlockIndex >= servers.size())
+		serverBlockIndex = 0;
+	const ServerBlock&	server = servers[serverBlockIndex];
+	if (server.getClientMaxBodySize() == 0)
+		return (static_cast<size_t>(-1));
+
+	size_t	maxBodySize = server.getClientMaxBodySize();
+	const std::vector<LocationBlock>& locations = server.getLocations();
+	for (std::size_t i = 0; i < locations.size(); ++i)
 	{
-		if (servers[i].getPort() != port)
+		if (!locations[i].hasClientMaxBodySize())
 			continue;
-		if (servers[i].getClientMaxBodySize() == 0)
+		if (locations[i].getClientMaxBodySize() == 0)
 			return (static_cast<size_t>(-1));
-		if (servers[i].getClientMaxBodySize() > maxBodySize)
-			maxBodySize = servers[i].getClientMaxBodySize();
-		const std::vector<LocationBlock>& locations = servers[i].getLocations();
-		for (std::size_t j = 0; j < locations.size(); ++j)
-		{
-			if (!locations[j].hasClientMaxBodySize())
-				continue;
-			if (locations[j].getClientMaxBodySize() == 0)
-				return (static_cast<size_t>(-1));
-			if (locations[j].getClientMaxBodySize() > maxBodySize)
-				maxBodySize = locations[j].getClientMaxBodySize();
-		}
+		if (locations[i].getClientMaxBodySize() > maxBodySize)
+			maxBodySize = locations[i].getClientMaxBodySize();
 	}
-	if (maxBodySize != 0)
-		return (maxBodySize);
-	return (servers[0].getClientMaxBodySize());
+	return (maxBodySize);
 }
 
 ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
@@ -188,7 +207,6 @@ ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
 	for (std::size_t i = 0; i < servers.size(); ++i)
 	{
 		int	listenFd = servers[i]->getSocketFd();
-		int	port = servers[i]->getPort();
 
 		if (listen(listenFd, SOMAXCONN) < 0)
 		{
@@ -206,7 +224,7 @@ ListenAndAcceptReqs::ListenAndAcceptReqs(const std::vector<Server*>& servers,
 			throw (ListenAndAcceptReqs::ListenOrAcceptionError());
 		}
 
-		listenFdToPort[listenFd] = port;
+		listenFdToServerIndex[listenFd] = servers[i]->getServerBlockIndex();
 	}
 }
 
@@ -233,13 +251,38 @@ ListenAndAcceptReqs::~ListenAndAcceptReqs()
 		cgiReadFdToClientFd.erase(cgiReadFdToClientFd.begin());
 	}
 
-	while (waitpid(-1, NULL, WNOHANG) > 0)
-		;
+	_reapChildrenNonBlocking();
 
 	if (epollFd != -1)
 	{
 		close(epollFd);
 		epollFd = -1;
+	}
+}
+
+void	ListenAndAcceptReqs::_queueChildForReap(pid_t pid, bool terminate)
+{
+	if (pid <= 0)
+		return ;
+	if (terminate)
+		kill(pid, SIGKILL);
+
+	const pid_t	result = waitpid(pid, NULL, WNOHANG);
+	if (result == 0 || (result == -1 && errno == EINTR))
+		pendingCgiChildren.insert(pid);
+}
+
+void	ListenAndAcceptReqs::_reapChildrenNonBlocking()
+{
+	std::set<pid_t>::iterator	it = pendingCgiChildren.begin();
+	while (it != pendingCgiChildren.end())
+	{
+		const pid_t	pid = *it;
+		const pid_t	result = waitpid(pid, NULL, WNOHANG);
+		if (result == pid || (result == -1 && errno != EINTR))
+			pendingCgiChildren.erase(it++);
+		else
+			++it;
 	}
 }
 
@@ -264,13 +307,18 @@ void	ListenAndAcceptReqs::_releaseClientResources(Client& client)
 
 	if (client.cgiPid > 0)
 	{
-		kill(client.cgiPid, SIGKILL);
-		while (waitpid(client.cgiPid, NULL, 0) == -1 && errno == EINTR)
-			;
+		const pid_t	pid = client.cgiPid;
+		_queueChildForReap(pid, true);
 		client.cgiPid = -1;
 	}
 
 	closeCgiSpool(client.cgiSpool);
+	if (client.responseFileFd != -1)
+	{
+		close(client.responseFileFd);
+		client.responseFileFd = -1;
+	}
+	client.responseFileRemaining = 0;
 
 	file.closeFile(client.clientFd);
 	client.requestBodyFd = -1;
@@ -292,17 +340,12 @@ void	ListenAndAcceptReqs::cleanupClient(int fd, std::map<int, int>& fdTargetTour
 bool	ListenAndAcceptReqs::_sendErrorAndMod(int fd, Client& client, int code)
 {
 	const std::vector<ServerBlock>&	servers = config.getServers();
-	const ServerBlock*	defServer = &servers[0];
-	for (std::size_t i = 0; i < servers.size(); ++i)
-	{
-		if (servers[i].getPort() == client.port)
-		{
-			defServer = &servers[i];
-			break;
-		}
-	}
+	std::size_t	serverBlockIndex = client.serverBlockIndex;
+	if (serverBlockIndex >= servers.size())
+		serverBlockIndex = 0;
+	const ServerBlock&	defServer = servers[serverBlockIndex];
 
-	Response	resp = Response::error(code, *defServer);
+	Response	resp = Response::error(code, defServer);
 	client.response = resp.serialize();
 	client.responseOffset = 0;
 
@@ -383,9 +426,12 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 		client.cgiSpool.writeFd = -1;
 	}
 
-	if (client.cgiPid > 0
-		&& waitpid(client.cgiPid, NULL, WNOHANG) == client.cgiPid)
+	if (client.cgiPid > 0)
+	{
+		const pid_t	pid = client.cgiPid;
+		_queueChildForReap(pid, true);
 		client.cgiPid = -1;
+	}
 
 	if (client.cgiSpool.bytesReceived == 0)
 	{
@@ -410,6 +456,24 @@ void	ListenAndAcceptReqs::_handleCgiRead(int cgiFd, std::map<int, int>& fdTarget
 		cleanupClient(clientFd, fdTargetTour);
 }
 
+void	ListenAndAcceptReqs::_handleCgiReadSafely(int cgiFd,
+		std::map<int, int>& fdTargetTour)
+{
+	int	clientFd = -1;
+	std::map<int, int>::const_iterator	it = cgiReadFdToClientFd.find(cgiFd);
+	if (it != cgiReadFdToClientFd.end())
+		clientFd = it->second;
+	try
+	{
+		_handleCgiRead(cgiFd, fdTargetTour);
+	}
+	catch (const std::bad_alloc&)
+	{
+		if (clientFd != -1 && clients.find(clientFd) != clients.end())
+			cleanupClient(clientFd, fdTargetTour);
+	}
+}
+
 void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequested)
 {
 	const int TICK_RATE = 1;
@@ -422,6 +486,7 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 
 	while (!shutdownRequested)
 	{
+		_reapChildrenNonBlocking();
 		const time_t now = std::time(NULL);
 
 		for (std::map<int, time_t>::iterator bit = blockedListeners.begin(); bit != blockedListeners.end(); )
@@ -476,18 +541,18 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 
 				if (epollEvents.at(i).events & (EPOLLERR | EPOLLHUP))
 				{
-					if (listenFdToPort.count(currentFd))
+					if (listenFdToServerIndex.count(currentFd))
 						continue ;
 					if (cgiReadFdToClientFd.count(currentFd))
 					{
-						_handleCgiRead(currentFd, fdTargetTour);
+							_handleCgiReadSafely(currentFd, fdTargetTour);
 						continue ;
 					}
 					cleanupClient(currentFd, fdTargetTour);
 					continue ;
 				}
 
-				if (listenFdToPort.count(currentFd))
+				if (listenFdToServerIndex.count(currentFd))
 				{
 					if (!(epollEvents.at(i).events & EPOLLIN))
 						continue ;
@@ -530,41 +595,54 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 						continue ;
 					}
 
-					struct Client client;
-					client.clientFd = clientSocket;
-					client.port = listenFdToPort[currentFd];
-					unsigned long	ip = ntohl(addr.sin_addr.s_addr);
-					std::stringstream	ipStream;
-					ipStream << ((ip >> 24) & 0xFF) << '.' << ((ip >> 16) & 0xFF) << '.'
-						<< ((ip >> 8) & 0xFF) << '.' << (ip & 0xFF);
-					client.clientIp = ipStream.str();
-					clients[clientSocket] = client;
-					fcntl(clientSocket, F_SETFD, FD_CLOEXEC);
+					try
+					{
+						struct Client client;
+						client.clientFd = clientSocket;
+						client.serverBlockIndex = listenFdToServerIndex[currentFd];
+						const std::vector<ServerBlock>&	serverBlocks = config.getServers();
+						client.port = serverBlocks[client.serverBlockIndex].getPort();
+						unsigned long	ip = ntohl(addr.sin_addr.s_addr);
+						std::stringstream	ipStream;
+						ipStream << ((ip >> 24) & 0xFF) << '.' << ((ip >> 16) & 0xFF) << '.'
+							<< ((ip >> 8) & 0xFF) << '.' << (ip & 0xFF);
+						client.clientIp = ipStream.str();
+						clients[clientSocket] = client;
+						fcntl(clientSocket, F_SETFD, FD_CLOEXEC);
 
-					fdTargetTour[clientSocket] = (tour + TIME_OUT) % MAX_TOUR;
-					timerWheel[(tour + TIME_OUT) % MAX_TOUR].push_back(clientSocket);
+						fdTargetTour[clientSocket] = (tour + TIME_OUT) % MAX_TOUR;
+						timerWheel[(tour + TIME_OUT) % MAX_TOUR].push_back(clientSocket);
+					}
+					catch (const std::bad_alloc&)
+					{
+						cleanupClient(clientSocket, fdTargetTour);
+					}
 					continue ;
 				}
 
 				if (cgiReadFdToClientFd.count(currentFd))
 				{
 					if (epollEvents.at(i).events & EPOLLIN)
-						_handleCgiRead(currentFd, fdTargetTour);
+							_handleCgiReadSafely(currentFd, fdTargetTour);
 					continue ;
 				}
-				if (clients.find(currentFd) == clients.end())
-					continue ;
+					if (clients.find(currentFd) == clients.end())
+						continue ;
 
-				if (epollEvents.at(i).events & EPOLLIN)
+					try
+					{
+					if (epollEvents.at(i).events & EPOLLIN)
 				{
 					int	update = 0;
 					bool disconnect = false;
 
-				const int result = Request::readFd(clients[currentFd], file, _getMaxBodySize(clients[currentFd].port));
+				const int result = Request::readFd(clients[currentFd], file,
+					_getMaxBodySize(clients[currentFd].serverBlockIndex));
 				if (!result && !Request::getErrno())
 				{
 					update = 1;
-					RequestHandler::handle(clients[currentFd], config, clients[currentFd].port);
+					RequestHandler::handle(clients[currentFd], config,
+						clients[currentFd].serverBlockIndex);
 
 					if (clients[currentFd].cgiActive)
 					{
@@ -680,12 +758,12 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					client.responseOffset += static_cast<std::size_t>(sent);
 					if (client.responseOffset == resp.size())
 					{
-						if (client.cgiSpool.bodyRemaining == 0)
-						{
-							cleanupClient(currentFd, fdTargetTour);
-							continue ;
-						}
-						if (!loadNextCgiChunk(client))
+						bool	loaded = false;
+						if (client.cgiSpool.bodyRemaining > 0)
+							loaded = loadNextCgiChunk(client);
+						else if (client.responseFileRemaining > 0)
+							loaded = loadNextStaticChunk(client);
+						if (!loaded)
 						{
 							cleanupClient(currentFd, fdTargetTour);
 							continue ;
@@ -703,10 +781,16 @@ void	ListenAndAcceptReqs::waitReqs(const volatile sig_atomic_t& shutdownRequeste
 					if (fdTargetTour[currentFd] != newTourNum)
 					{
 						timerWheel[newTourNum].push_back(currentFd);
-						fdTargetTour[currentFd] = newTourNum;
+							fdTargetTour[currentFd] = newTourNum;
+						}
+					}
+					}
+					catch (const std::bad_alloc&)
+					{
+						cleanupClient(currentFd, fdTargetTour);
+						continue ;
 					}
 				}
-			}
 		}
 	}
 }

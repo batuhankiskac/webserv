@@ -15,6 +15,15 @@ enum RequestState
 	REQUEST_COMPLETE
 };
 
+enum ChunkState
+{
+	CHUNK_READING_SIZE,
+	CHUNK_READING_DATA,
+	CHUNK_EXPECTING_DATA_CRLF,
+	CHUNK_READING_TRAILERS,
+	CHUNK_COMPLETE
+};
+
 struct CgiSpoolState
 {
 	int			readFd;
@@ -36,11 +45,15 @@ struct Client
 	int			requestBodyFd;
 	std::string	requestBodyPath;
 	int			port;
+	std::size_t	serverBlockIndex;
 	std::string	clientIp;
 
 	long long	contentLength;
 	RequestState	state;
 	std::size_t	bodyReceived;
+	ChunkState	chunkState;
+	std::size_t	chunkBytesRemaining;
+	std::size_t	chunkMetadataBytes;
 
 	std::string	rawBuffer;
 	std::string	requestHeader;
@@ -48,6 +61,8 @@ struct Client
 
 	std::string	response;
 	std::size_t	responseOffset;
+	int			responseFileFd;
+	off_t		responseFileRemaining;
 
 	RequestParser	request;
 

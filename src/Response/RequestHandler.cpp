@@ -64,6 +64,12 @@ static std::string	_sizeToString(size_t n) {
 	return (ss.str());
 }
 
+static std::string	_fileSizeToString(off_t n) {
+	std::stringstream	ss;
+	ss << n;
+	return (ss.str());
+}
+
 static void	_closeCgiSpool(CgiSpoolState& spool) {
 	if (spool.readFd != -1)
 		close(spool.readFd);
@@ -73,6 +79,12 @@ static void	_closeCgiSpool(CgiSpoolState& spool) {
 	spool.writeFd = -1;
 	spool.bytesReceived = 0;
 	spool.bodyRemaining = 0;
+}
+
+static void	_closeFd(int& fd) {
+	if (fd != -1)
+		close(fd);
+	fd = -1;
 }
 
 static bool	_openCgiSpool(CgiSpoolState& spool, int clientFd) {
@@ -163,6 +175,17 @@ static bool	_isMethodAllowed(const LocationBlock& location, const std::string& m
 	return (false);
 }
 
+static bool	_isCgiRequest(const LocationBlock& location,
+		const std::string& requestPath) {
+	const std::string&	cgiExt = location.getCgiExt();
+	const std::string&	cgiPath = location.getCgiPath();
+
+	return (!cgiExt.empty() && !cgiPath.empty()
+		&& requestPath.size() >= cgiExt.size()
+		&& requestPath.compare(requestPath.size() - cgiExt.size(),
+			cgiExt.size(), cgiExt) == 0);
+}
+
 static void	_serveMethodNotAllowed(Client& client, const ServerBlock& server,
 		const LocationBlock& location) {
 	Response	resp = Response::error(HTTP_METHOD_NOT_ALLOWED, server);
@@ -207,6 +230,63 @@ static bool	_hasParentTraversal(const std::string& path) {
 	return false;
 }
 
+static bool	_splitCgiScriptPath(const std::string& physicalPath,
+		std::string& scriptDirectory, std::string& scriptName) {
+	const std::size_t	slash = physicalPath.rfind('/');
+
+	if (slash == std::string::npos) {
+		scriptDirectory = ".";
+		scriptName = physicalPath;
+	} else {
+		scriptDirectory = slash == 0 ? "/" : physicalPath.substr(0, slash);
+		scriptName = physicalPath.substr(slash + 1);
+	}
+	return (!scriptName.empty());
+}
+
+static bool	_buildCgiPathAfterChdir(const std::string& scriptDirectory,
+		const std::string& configuredPath, std::string& executablePath) {
+	if (configuredPath.empty())
+		return (false);
+	if (configuredPath[0] == '/') {
+		executablePath = configuredPath;
+		return (true);
+	}
+	if (scriptDirectory == ".") {
+		executablePath = configuredPath;
+		return (true);
+	}
+	if (scriptDirectory.empty() || scriptDirectory[0] == '/')
+		return (false);
+
+	std::vector<std::string>	parts;
+	std::size_t	start = 0;
+	while (start <= scriptDirectory.size()) {
+		std::size_t	end = scriptDirectory.find('/', start);
+		if (end == std::string::npos)
+			end = scriptDirectory.size();
+		const std::string	part = scriptDirectory.substr(start, end - start);
+		if (!part.empty() && part != ".") {
+			if (part == "..") {
+				if (parts.empty())
+					return (false);
+				parts.pop_back();
+			} else {
+				parts.push_back(part);
+			}
+		}
+		if (end == scriptDirectory.size())
+			break;
+		start = end + 1;
+	}
+
+	executablePath.clear();
+	for (std::size_t i = 0; i < parts.size(); ++i)
+		executablePath += "../";
+	executablePath += configuredPath;
+	return (true);
+}
+
 static std::string	_htmlEscape(const std::string& value) {
 	std::string out;
 	for (size_t i = 0; i < value.size(); ++i) {
@@ -222,14 +302,12 @@ static std::string	_htmlEscape(const std::string& value) {
 	return out;
 }
 
-const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& config, int port) {
+const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& config,
+		std::size_t serverBlockIndex) {
 	const std::vector<ServerBlock>&	servers = config.getServers();
 
-	for (size_t i = 0; i < servers.size(); ++i) {
-		if (servers[i].getPort() == port)
-			return (servers[i]);
-	}
-
+	if (serverBlockIndex < servers.size())
+		return (servers[serverBlockIndex]);
 	return (servers[0]);
 }
 
@@ -274,6 +352,7 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 	if (S_ISDIR(st.st_mode)) {
 		const std::vector<std::string>&	index = loc.getIndex();
 		bool	found = false;
+		std::string	indexRequestPath;
 		for (size_t i = 0; i < index.size(); ++i) {
 			std::string	indexPath = filePath;
 			if (indexPath[indexPath.size() - 1] != '/')
@@ -283,6 +362,12 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 			struct stat	idxSt;
 			if (stat(indexPath.c_str(), &idxSt) == 0 && S_ISREG(idxSt.st_mode)) {
 				filePath = indexPath;
+				st = idxSt;
+				indexRequestPath = reqPath;
+				if (indexRequestPath.empty()
+					|| indexRequestPath[indexRequestPath.size() - 1] != '/')
+					indexRequestPath += '/';
+				indexRequestPath += index[i];
 				found = true;
 				break;
 			}
@@ -296,26 +381,44 @@ void	RequestHandler::_handleGet(Client& client, const ServerBlock& server, const
 			_respond(client, HTTP_OK, html, "text/html");
 			return;
 		}
+		if (_isCgiRequest(loc, indexRequestPath)) {
+			_handleCgi(client, server, loc, indexRequestPath);
+			return;
+		}
 	} else if (!S_ISREG(st.st_mode)) {
 		_serveError(client, HTTP_FORBIDDEN, server);
 		return;
 	}
 
-	std::ifstream	f(filePath.c_str(), std::ios::binary);
-	if (!f.is_open()) {
+	if (st.st_size < 0) {
+		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+		return;
+	}
+	const int	responseFileFd = open(filePath.c_str(), O_RDONLY);
+	if (responseFileFd == -1) {
 		_serveError(client, HTTP_FORBIDDEN, server);
 		return;
 	}
-
-	std::stringstream	ss;
-	ss << f.rdbuf();
-	std::string	body = ss.str();
-	if (f.bad()) {
+	if (fcntl(responseFileFd, F_SETFD, FD_CLOEXEC) == -1) {
+		close(responseFileFd);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
 
-	_respond(client, HTTP_OK, body, _lookupMimeType(filePath));
+	client.responseFileFd = responseFileFd;
+	client.responseFileRemaining = st.st_size;
+	Response	resp;
+	resp.setHttpVersion(client.request.getHttpVersion());
+	resp.setStatus(HTTP_OK);
+	resp.addHeader("Content-Type", _lookupMimeType(filePath));
+	resp.addHeader("Content-Length", _fileSizeToString(st.st_size));
+	resp.addHeader("Connection", "close");
+	client.response = resp.serialize();
+	client.responseOffset = 0;
+	if (client.responseFileRemaining == 0) {
+		close(client.responseFileFd);
+		client.responseFileFd = -1;
+	}
 }
 
 std::string	RequestHandler::_generateAutoindex(const std::string& filePath, const std::string& reqPath) {
@@ -362,7 +465,7 @@ std::string	RequestHandler::_generateAutoindex(const std::string& filePath, cons
 }
 
 char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
-		const LocationBlock& loc, const std::string& reqPath,
+		const std::string& reqPath, const std::string& scriptFilename,
 		std::vector<std::string>& envStorage) {
 	envStorage.push_back("GATEWAY_INTERFACE=CGI/1.1");
 	envStorage.push_back("SERVER_SOFTWARE=webserv/1.0");
@@ -377,9 +480,9 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 		requestUri += "?" + client.request.getQueryString();
 	envStorage.push_back("REQUEST_URI=" + requestUri);
 	envStorage.push_back("SCRIPT_NAME=" + reqPath);
-	envStorage.push_back("SCRIPT_FILENAME=" + _joinLocationPath(loc, reqPath));
+	envStorage.push_back("SCRIPT_FILENAME=" + scriptFilename);
 	envStorage.push_back("PATH_INFO=" + reqPath);
-	envStorage.push_back("PATH_TRANSLATED=" + _joinLocationPath(loc, reqPath));
+	envStorage.push_back("PATH_TRANSLATED=" + scriptFilename);
 	envStorage.push_back("REDIRECT_STATUS=200");
 
 	if (client.contentLength >= 0) {
@@ -411,21 +514,34 @@ char** RequestHandler::_buildCgiEnv(Client& client, const ServerBlock& server,
 }
 
 void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
-		const LocationBlock& loc, const std::string& reqPath) {
+			const LocationBlock& loc, const std::string& reqPath) {
 	client.cgiActive = false;
-	int cgiOut[2];
+	const std::string	physicalPath = _joinLocationPath(loc, reqPath);
+	const std::string	cgiPath = loc.getCgiPath();
+	std::string	scriptDirectory;
+	std::string	scriptName;
+	std::string	executablePath;
+	if (!_splitCgiScriptPath(physicalPath, scriptDirectory, scriptName)
+		|| !_buildCgiPathAfterChdir(scriptDirectory, cgiPath, executablePath)) {
+		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
+		return;
+	}
+
+	int cgiOut[2] = {-1, -1};
+	int stdinFd = -1;
+	char** envp = NULL;
+	try {
 	if (pipe(cgiOut) == -1) {
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
 	if (fcntl(cgiOut[0], F_SETFL, O_NONBLOCK) == -1) {
-		close(cgiOut[0]);
-		close(cgiOut[1]);
+		_closeFd(cgiOut[0]);
+		_closeFd(cgiOut[1]);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
 
-	int stdinFd = -1;
 	if (client.requestBodyFd != -1 && !client.requestBodyPath.empty())
 		stdinFd = open(client.requestBodyPath.c_str(), O_RDONLY);
 
@@ -435,8 +551,8 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		std::string tmpPath = ss.str();
 		int tempFd = open(tmpPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
 		if (tempFd == -1) {
-			close(cgiOut[0]);
-			close(cgiOut[1]);
+			_closeFd(cgiOut[0]);
+			_closeFd(cgiOut[1]);
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
@@ -446,7 +562,8 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 			if (n <= 0) {
 				close(tempFd);
 				std::remove(tmpPath.c_str());
-				close(cgiOut[0]); close(cgiOut[1]);
+				_closeFd(cgiOut[0]);
+				_closeFd(cgiOut[1]);
 				_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 				return;
 			}
@@ -456,35 +573,38 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 		stdinFd = open(tmpPath.c_str(), O_RDONLY);
 		std::remove(tmpPath.c_str());
 		if (stdinFd == -1) {
-			close(cgiOut[0]); close(cgiOut[1]);
+			_closeFd(cgiOut[0]);
+			_closeFd(cgiOut[1]);
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
 	}
 	if (client.requestBodyFd != -1 && stdinFd == -1) {
-		close(cgiOut[0]); close(cgiOut[1]);
+		_closeFd(cgiOut[0]);
+		_closeFd(cgiOut[1]);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
 	if (stdinFd == -1) {
 		stdinFd = open("/dev/null", O_RDONLY);
 		if (stdinFd == -1) {
-			close(cgiOut[0]); close(cgiOut[1]);
+			_closeFd(cgiOut[0]);
+			_closeFd(cgiOut[1]);
 			_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 			return;
 		}
 	}
 
 	std::vector<std::string> envStorage;
-	char** envp = _buildCgiEnv(client, server, loc, reqPath, envStorage);
-	std::string physicalPath = _joinLocationPath(loc, reqPath);
-	std::string cgiPath = loc.getCgiPath();
+	envp = _buildCgiEnv(client, server, reqPath, scriptName,
+		envStorage);
 	if (!_openCgiSpool(client.cgiSpool, client.clientFd)) {
 		delete[] envp;
-		close(cgiOut[0]);
-		close(cgiOut[1]);
+		envp = NULL;
+		_closeFd(cgiOut[0]);
+		_closeFd(cgiOut[1]);
 		if (stdinFd != -1 && stdinFd != client.requestBodyFd)
-			close(stdinFd);
+			_closeFd(stdinFd);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
@@ -492,10 +612,11 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 	pid_t pid = fork();
 	if (pid == -1) {
 		delete[] envp;
-		close(cgiOut[0]);
-		close(cgiOut[1]);
+		envp = NULL;
+		_closeFd(cgiOut[0]);
+		_closeFd(cgiOut[1]);
 		if (stdinFd != -1 && stdinFd != client.requestBodyFd)
-			close(stdinFd);
+			_closeFd(stdinFd);
 		_closeCgiSpool(client.cgiSpool);
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
@@ -503,32 +624,62 @@ void RequestHandler::_handleCgi(Client& client, const ServerBlock& server,
 
 	if (pid == 0) {
 		close(cgiOut[0]);
-		dup2(cgiOut[1], STDOUT_FILENO);
+		if (chdir(scriptDirectory.c_str()) == -1) {
+			close(cgiOut[1]);
+			close(stdinFd);
+			_closeCgiSpool(client.cgiSpool);
+			delete[] envp;
+			std::exit(1);
+		}
+		if (dup2(cgiOut[1], STDOUT_FILENO) == -1) {
+			close(cgiOut[1]);
+			close(stdinFd);
+			_closeCgiSpool(client.cgiSpool);
+			delete[] envp;
+			std::exit(1);
+		}
 		close(cgiOut[1]);
 		if (stdinFd != -1) {
-			dup2(stdinFd, STDIN_FILENO);
+			if (dup2(stdinFd, STDIN_FILENO) == -1) {
+				close(stdinFd);
+				close(STDOUT_FILENO);
+				_closeCgiSpool(client.cgiSpool);
+				delete[] envp;
+				std::exit(1);
+			}
 			close(stdinFd);
 		}
 		_closeCgiSpool(client.cgiSpool);
 		char* argv[3];
-		argv[0] = const_cast<char*>(cgiPath.c_str());
-		argv[1] = const_cast<char*>(physicalPath.c_str());
+		argv[0] = const_cast<char*>(executablePath.c_str());
+		argv[1] = const_cast<char*>(scriptName.c_str());
 		argv[2] = NULL;
 		execve(argv[0], argv, envp);
-		std::string fail = "Status: " + _sizeToString(HTTP_INTERNAL_SERVER_ERROR) + " Internal Server Error\r\n"
-		                   "Content-Type: text/plain\r\n\r\nCGI execution failed";
-		write(STDOUT_FILENO, fail.c_str(), fail.size());
+		close(STDOUT_FILENO);
+		delete[] envp;
 		std::exit(1);
 	}
 
-	close(cgiOut[1]);
+	_closeFd(cgiOut[1]);
 	if (stdinFd != -1 && stdinFd != client.requestBodyFd)
-		close(stdinFd);
+		_closeFd(stdinFd);
 	delete[] envp;
+	envp = NULL;
 
 	client.cgiOutFd = cgiOut[0];
 	client.cgiPid = pid;
 	client.cgiActive = true;
+	}
+	catch (const std::bad_alloc&)
+	{
+		delete[] envp;
+		_closeFd(cgiOut[0]);
+		_closeFd(cgiOut[1]);
+		if (stdinFd != -1 && stdinFd != client.requestBodyFd)
+			_closeFd(stdinFd);
+		_closeCgiSpool(client.cgiSpool);
+		throw;
+	}
 }
 
 void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, const LocationBlock& loc) {
@@ -620,8 +771,9 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 	client.response = resp.serialize();
 }
 
-void	RequestHandler::handle(Client& client, const WebservConfig& config, int port) {
-	const ServerBlock&	server = _selectServerBlock(config, port);
+void	RequestHandler::handle(Client& client, const WebservConfig& config,
+		std::size_t serverBlockIndex) {
+	const ServerBlock&	server = _selectServerBlock(config, serverBlockIndex);
 
 	std::string	reqPath = client.request.getPath();
 	const LocationBlock*	loc = _selectLocationBlock(server, reqPath);
@@ -665,11 +817,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config, int por
 		return;
 	}
 
-	std::string	cgiExt = loc->getCgiExt();
-	std::string	cgiPath = loc->getCgiPath();
-	if (!cgiExt.empty() && !cgiPath.empty() &&
-		reqPath.size() >= cgiExt.size() &&
-		reqPath.compare(reqPath.size() - cgiExt.size(), cgiExt.size(), cgiExt) == 0) {
+	if (_isCgiRequest(*loc, reqPath)) {
 		_handleCgi(client, server, *loc, reqPath);
 		return;
 	}

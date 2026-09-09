@@ -49,7 +49,7 @@ int	main(int argc, char** argv) {
 				continue ;
 			seen.insert(key);
 
-			Server*	srv = new Server(ip, port);
+			Server*	srv = new Server(ip, port, i);
 			servers.push_back(srv);
 		}
 

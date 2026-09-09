@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <map>
+#include <set>
 #include <ctime>
 #include <csignal>
 
@@ -34,21 +35,25 @@ class ListenAndAcceptReqs
 
 	private:
 		int	epollFd;
-		std::map<int, int> listenFdToPort;
+		std::map<int, std::size_t> listenFdToServerIndex;
 		std::vector<struct epoll_event> epollEvents;
 		std::map<int, Client> clients;
 		std::map<int, time_t> blockedListeners;
 
 		std::map<int, int> cgiReadFdToClientFd;
+		std::set<pid_t> pendingCgiChildren;
 
 		File& file;
 		const WebservConfig& config;
 
-		size_t	_getMaxBodySize(int port) const;
+		size_t	_getMaxBodySize(std::size_t serverBlockIndex) const;
+		void	_queueChildForReap(pid_t pid, bool terminate);
+		void	_reapChildrenNonBlocking();
 		void	_releaseClientResources(Client& client);
 		void	cleanupClient(int fd, std::map<int, int>& fdTargetTour);
 		bool	_sendErrorAndMod(int fd, Client& client, int code);
 		void	_handleCgiRead(int cgiFd, std::map<int, int>& fdTargetTour);
+		void	_handleCgiReadSafely(int cgiFd, std::map<int, int>& fdTargetTour);
 
 		class ListenOrAcceptionError : public std::exception
 		{

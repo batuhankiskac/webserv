@@ -1,7 +1,8 @@
 #include "Server.hpp"
 #include <netdb.h>
 
-Server::Server(std::string ip, int port) : port(port)
+Server::Server(std::string ip, int port, std::size_t serverBlockIndex) :
+	ip(ip), port(port), serverBlockIndex(serverBlockIndex)
 {
 	socketFd = socket(AF_INET, SOCK_STREAM, 0);
 	if (socketFd < 0)
@@ -65,6 +66,16 @@ int Server::getSocketFd( void ) const
 int Server::getPort( void ) const
 {
 	return (port);
+}
+
+const std::string& Server::getIp( void ) const
+{
+	return (ip);
+}
+
+std::size_t Server::getServerBlockIndex( void ) const
+{
+	return (serverBlockIndex);
 }
 
 Server::SocketCreationError::SocketCreationError() : _errno(errno) {}

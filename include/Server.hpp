@@ -9,19 +9,24 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <cstring>
+#include <cstddef>
 
 class Server
 {
 	public:
-		Server(std::string ip, int port);
+		Server(std::string ip, int port, std::size_t serverBlockIndex);
 		~Server();
 
 		int getSocketFd( void ) const;
 		int getPort( void ) const;
+		const std::string& getIp( void ) const;
+		std::size_t getServerBlockIndex( void ) const;
 
 	private:
 		int	socketFd;
+		const std::string	ip;
 		const int	port;
+		const std::size_t	serverBlockIndex;
 
 		class SocketCreationError : public std::exception
 		{

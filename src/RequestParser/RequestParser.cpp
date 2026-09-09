@@ -53,6 +53,13 @@ void RequestParser::_parseRequestLine(const std::string& line) {
 		_setError(HTTP_BAD_REQUEST);
 		return;
 	}
+	for (size_t i = 0; i < fullPath.size(); ++i) {
+		const unsigned char	c = static_cast<unsigned char>(fullPath[i]);
+		if (c < 0x20 || c == 0x7f) {
+			_setError(HTTP_BAD_REQUEST);
+			return;
+		}
+	}
 	if (line.size() > MAX_REQUEST_LINE) {
 		_setError(HTTP_URI_TOO_LONG);
 		return;
