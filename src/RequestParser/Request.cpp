@@ -164,20 +164,24 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 			if (client.state == READING_HEADERS)
 			{
 				std::size_t firstLine = client.rawBuffer.find("\r\n");
-				if (firstLine != std::string::npos && firstLine > MAX_REQUEST_LINE)
+				if ((firstLine == std::string::npos
+						&& client.rawBuffer.size() > MAX_REQUEST_LINE)
+					|| (firstLine != std::string::npos
+						&& firstLine > MAX_REQUEST_LINE))
 				{
 					_errno = -HTTP_URI_TOO_LONG;
 					return (-1);
 				}
-				if (client.rawBuffer.size()> MAX_HEADERS_SIZE)
+
+				std::string&	req = client.rawBuffer;
+				std::size_t	pos = req.find("\r\n\r\n");
+				if ((pos == std::string::npos && req.size() > MAX_HEADERS_SIZE)
+					|| (pos != std::string::npos && pos + 4 > MAX_HEADERS_SIZE))
 				{
 					_errno = -HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
 					return (-1);
 				}
 
-				std::string&	req = client.rawBuffer;
-
-				std::size_t	pos = req.find("\r\n\r\n");
 				if (pos != std::string::npos)
 				{
 					client.requestHeader = req.substr(0, pos);
@@ -202,7 +206,8 @@ int Request::readFd(struct Client &client, File& file, size_t maxBodySize)
 					}
 					else if (client.contentLength > 0)
 					{
-						if (client.contentLength > static_cast<long long>(maxBodySize))
+						if (maxBodySize != static_cast<size_t>(-1)
+							&& static_cast<size_t>(client.contentLength) > maxBodySize)
 						{
 							_errno = -HTTP_PAYLOAD_TOO_LARGE;
 							return (-1);

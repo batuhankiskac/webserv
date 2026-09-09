@@ -2,6 +2,7 @@
 #include "HttpConstants.hpp"
 #include <sstream>
 #include <fstream>
+#include <sys/stat.h>
 
 static const ErrorInfo	g_errorTable[] = {
 	{ HTTP_OK,							"OK",							"" },
@@ -70,6 +71,10 @@ std::string	Response::_defaultErrorHtml(int code) {
 }
 
 bool Response::_readFileToString(const std::string& path, std::string& out) {
+	struct stat	st;
+	if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+		return false;
+
 	std::ifstream	f(path.c_str(), std::ios::binary);
 	if (!f.is_open())
 		return false;

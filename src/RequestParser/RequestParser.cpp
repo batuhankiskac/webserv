@@ -107,7 +107,8 @@ void RequestParser::_validateHeaders() {
 			return;
 		}
 	}
-	if (!cl.empty() && !getHeader("transfer-encoding").empty()) {
+	if (_headers.count("content-length") != 0
+		&& _headers.count("transfer-encoding") != 0) {
 		_setError(HTTP_BAD_REQUEST);
 		return;
 	}

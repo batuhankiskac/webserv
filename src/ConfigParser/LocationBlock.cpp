@@ -152,7 +152,7 @@ void LocationBlock::_parseReturn(const std::vector<std::string>& _tokens, size_t
 
 	std::stringstream ss(_tokens[i++]);
 	ss >> _returnCode;
-	if (ss.fail()) {
+	if (ss.fail() || !ss.eof()) {
 		throw std::runtime_error("Invalid return directive");
 	}
 

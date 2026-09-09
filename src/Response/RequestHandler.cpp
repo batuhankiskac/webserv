@@ -706,28 +706,37 @@ void	RequestHandler::_handlePost(Client& client, const ServerBlock& server, cons
 
 	bool	written = false;
 	std::ofstream out(targetPath.c_str(), std::ios::binary);
-	if (out.is_open()) {
+	const bool	targetOpened = out.is_open();
+	if (targetOpened) {
 		if (!client.requestBody.empty()) {
 			out.write(client.requestBody.data(), static_cast<std::streamsize>(client.requestBody.size()));
-			written = !out.bad();
+			written = out.good();
 		} else if (client.requestBodyFd != -1) {
 			int readFd = open(client.requestBodyPath.c_str(), O_RDONLY);
 			if (readFd != -1) {
 				char buf[4096];
 				ssize_t n;
 				written = true;
-				while ((n = read(readFd, buf, sizeof(buf))) > 0)
+				while (written && (n = read(readFd, buf, sizeof(buf))) > 0) {
 					out.write(buf, static_cast<std::streamsize>(n));
+					written = out.good();
+				}
+				if (n < 0)
+					written = false;
 				close(readFd);
-				written = written && !out.bad();
 			}
 		} else {
 			written = true;
 		}
+		out.flush();
+		written = written && out.good();
 		out.close();
+		written = written && out.good();
 	}
 
 	if (!written) {
+		if (targetOpened)
+			std::remove(targetPath.c_str());
 		_serveError(client, HTTP_INTERNAL_SERVER_ERROR, server);
 		return;
 	}
@@ -766,7 +775,6 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 	Response	resp;
 	resp.setHttpVersion(client.request.getHttpVersion());
 	resp.setStatus(HTTP_NO_CONTENT);
-	resp.addHeader("Content-Length", "0");
 	resp.addHeader("Connection", "close");
 	client.response = resp.serialize();
 }

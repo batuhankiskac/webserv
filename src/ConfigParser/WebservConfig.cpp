@@ -36,7 +36,7 @@ void WebservConfig::_tokenize(const std::string& raw, std::vector<std::string>& 
 	std::string	current;
 
 	for (size_t i = 0; i < raw.length(); ++i) {
-		if (std::isspace(raw[i])) {
+		if (std::isspace(static_cast<unsigned char>(raw[i]))) {
 			if (current.empty()) {
 				continue;
 			}
