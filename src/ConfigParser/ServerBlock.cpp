@@ -69,6 +69,8 @@ void ServerBlock::parseServerBlock(const std::vector<std::string>& _tokens, size
 		const std::string& token = _tokens[i];
 		if (token == "listen")
 			_parseListen(_tokens, i);
+		else if (token == "server_name")
+			_parseServerName(_tokens, i);
 		else if (token == "error_page")
 			_parseErrorPage(_tokens, i);
 		else if (token == "client_max_body_size")
@@ -116,6 +118,17 @@ void ServerBlock::_parseListen(const std::vector<std::string>& _tokens, size_t& 
 	if (i >= _tokens.size() || _tokens[i] != ";") {
 		throw std::runtime_error("Invalid listen directive");
 	}
+	i++;
+}
+
+void ServerBlock::_parseServerName(const std::vector<std::string>& _tokens, size_t& i) {
+	i++;
+
+	while (i < _tokens.size() && _tokens[i] != ";")
+		_serverNames.push_back(_tokens[i++]);
+
+	if (i >= _tokens.size() || _tokens[i] != ";")
+		throw std::runtime_error("Invalid server_name directive");
 	i++;
 }
 
@@ -183,6 +196,10 @@ const std::string& ServerBlock::getIp() const {
 
 size_t ServerBlock::getClientMaxBodySize() const {
 	return _clientMaxBodySize;
+}
+
+const std::vector<std::string>& ServerBlock::getServerNames() const {
+	return _serverNames;
 }
 
 const std::map<std::string, std::string>& ServerBlock::getErrorPages() const {

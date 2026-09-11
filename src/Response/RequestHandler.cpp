@@ -302,13 +302,41 @@ static std::string	_htmlEscape(const std::string& value) {
 	return out;
 }
 
-const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& config,
-		std::size_t serverBlockIndex) {
-	const std::vector<ServerBlock>&	servers = config.getServers();
+static std::string	_toLowerAscii(std::string value) {
+	for (size_t i = 0; i < value.size(); ++i)
+		value[i] = static_cast<char>(
+			std::tolower(static_cast<unsigned char>(value[i])));
+	return (value);
+}
 
-	if (serverBlockIndex < servers.size())
-		return (servers[serverBlockIndex]);
-	return (servers[0]);
+std::string	RequestHandler::_extractHost(const Client& client) {
+	std::string	host = client.request.getHeader("host");
+	if (host.empty())
+		return ("");
+	const size_t	colon = host.find(':');
+	if (colon != std::string::npos)
+		host = host.substr(0, colon);
+	return (_toLowerAscii(host));
+}
+
+const ServerBlock&	RequestHandler::_selectServerBlock(const WebservConfig& config,
+		std::size_t serverBlockIndex, const std::string& host) {
+	const std::vector<ServerBlock>&	servers = config.getServers();
+	if (serverBlockIndex >= servers.size())
+		serverBlockIndex = 0;
+	const ServerBlock&	defaultServer = servers[serverBlockIndex];
+
+	for (size_t i = 0; i < servers.size(); ++i) {
+		if (servers[i].getIp() != defaultServer.getIp()
+			|| servers[i].getPort() != defaultServer.getPort())
+			continue;
+		const std::vector<std::string>&	names = servers[i].getServerNames();
+		for (size_t j = 0; j < names.size(); ++j) {
+			if (_toLowerAscii(names[j]) == host)
+				return (servers[i]);
+		}
+	}
+	return (defaultServer);
 }
 
 const LocationBlock*	RequestHandler::_selectLocationBlock(const ServerBlock& server, const std::string& path) {
@@ -781,7 +809,8 @@ void	RequestHandler::_handleDelete(Client& client, const ServerBlock& server, co
 
 void	RequestHandler::handle(Client& client, const WebservConfig& config,
 		std::size_t serverBlockIndex) {
-	const ServerBlock&	server = _selectServerBlock(config, serverBlockIndex);
+	const std::string	host = _extractHost(client);
+	const ServerBlock&	server = _selectServerBlock(config, serverBlockIndex, host);
 
 	std::string	reqPath = client.request.getPath();
 	const LocationBlock*	loc = _selectLocationBlock(server, reqPath);
@@ -818,9 +847,7 @@ void	RequestHandler::handle(Client& client, const WebservConfig& config,
 
 	const size_t	maxBodySize = loc->hasClientMaxBodySize()
 		? loc->getClientMaxBodySize() : server.getClientMaxBodySize();
-	long long	contentLen = client.contentLength;
-	if (maxBodySize != 0 && contentLen > 0
-		&& static_cast<size_t>(contentLen) > maxBodySize) {
+	if (maxBodySize != 0 && client.bodyReceived > maxBodySize) {
 		_serveError(client, HTTP_PAYLOAD_TOO_LARGE, server);
 		return;
 	}

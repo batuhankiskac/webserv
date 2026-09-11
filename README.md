@@ -88,6 +88,7 @@ The configuration file controls things like:
 
 * listening ports
 * listening interfaces
+* server names
 * maximum request body size
 * custom error pages
 * allowed HTTP methods

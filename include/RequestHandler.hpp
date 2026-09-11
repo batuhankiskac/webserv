@@ -9,7 +9,9 @@
 class RequestHandler {
 private:
 	RequestHandler();
-	static const ServerBlock& _selectServerBlock(const WebservConfig& config, std::size_t serverBlockIndex);
+	static std::string _extractHost(const Client& client);
+	static const ServerBlock& _selectServerBlock(const WebservConfig& config,
+		std::size_t serverBlockIndex, const std::string& host);
 	static const LocationBlock* _selectLocationBlock(const ServerBlock& server, const std::string& path);
 	static void _serveError(Client& client, int code, const ServerBlock& server);
 	static void _handleGet(Client& client, const ServerBlock& server, const LocationBlock& loc, const std::string& reqPath);

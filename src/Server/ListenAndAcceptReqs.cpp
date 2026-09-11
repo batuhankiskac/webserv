@@ -174,20 +174,27 @@ size_t	ListenAndAcceptReqs::_getMaxBodySize(std::size_t serverBlockIndex) const
 	const std::vector<ServerBlock>&	servers = config.getServers();
 	if (serverBlockIndex >= servers.size())
 		serverBlockIndex = 0;
-	const ServerBlock&	server = servers[serverBlockIndex];
-	if (server.getClientMaxBodySize() == 0)
-		return (static_cast<size_t>(-1));
-
-	size_t	maxBodySize = server.getClientMaxBodySize();
-	const std::vector<LocationBlock>& locations = server.getLocations();
-	for (std::size_t i = 0; i < locations.size(); ++i)
+	const ServerBlock&	defaultServer = servers[serverBlockIndex];
+	size_t	maxBodySize = 0;
+	for (std::size_t i = 0; i < servers.size(); ++i)
 	{
-		if (!locations[i].hasClientMaxBodySize())
+		if (servers[i].getIp() != defaultServer.getIp()
+			|| servers[i].getPort() != defaultServer.getPort())
 			continue;
-		if (locations[i].getClientMaxBodySize() == 0)
+		if (servers[i].getClientMaxBodySize() == 0)
 			return (static_cast<size_t>(-1));
-		if (locations[i].getClientMaxBodySize() > maxBodySize)
-			maxBodySize = locations[i].getClientMaxBodySize();
+		if (servers[i].getClientMaxBodySize() > maxBodySize)
+			maxBodySize = servers[i].getClientMaxBodySize();
+		const std::vector<LocationBlock>& locations = servers[i].getLocations();
+		for (std::size_t j = 0; j < locations.size(); ++j)
+		{
+			if (!locations[j].hasClientMaxBodySize())
+				continue;
+			if (locations[j].getClientMaxBodySize() == 0)
+				return (static_cast<size_t>(-1));
+			if (locations[j].getClientMaxBodySize() > maxBodySize)
+				maxBodySize = locations[j].getClientMaxBodySize();
+		}
 	}
 	return (maxBodySize);
 }
