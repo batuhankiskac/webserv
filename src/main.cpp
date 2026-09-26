@@ -9,6 +9,8 @@
 #include <utility>
 #include <csignal>
 
+#define DEFAULT_CONFIG_PATH "config/default.conf"
+
 static volatile sig_atomic_t	gShutdownRequested = 0;
 
 static void	handleShutdownSignal(int signal) {
@@ -17,10 +19,11 @@ static void	handleShutdownSignal(int signal) {
 }
 
 int	main(int argc, char** argv) {
-	if (argc != 2) {
-		std::cerr << "Usage: " << argv[0] << " <configuration_file>" << std::endl;
+	if (argc > 2) {
+		std::cerr << "Usage: " << argv[0] << " [configuration_file]" << std::endl;
 		return (1);
 	}
+	const std::string	configPath = (argc == 2) ? argv[1] : DEFAULT_CONFIG_PATH;
 
 	std::signal(SIGPIPE, SIG_IGN);
 	if (std::signal(SIGINT, handleShutdownSignal) == SIG_ERR
@@ -33,7 +36,7 @@ int	main(int argc, char** argv) {
 	File	file;
 
 	try {
-		WebservConfig	config(argv[1]);
+		WebservConfig	config(configPath);
 
 		file.setPath("/var/tmp/webserv_body_");
 

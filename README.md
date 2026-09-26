@@ -72,10 +72,10 @@ make re
 
 ### Execution
 
-Start the server by giving it a configuration file:
+Start the server from the repository root. Without an argument it loads the default configuration, `config/default.conf`, which serves the demo site in `website/` on ports 8080 and 9090:
 
 ```bash
-./webserv config/example.conf
+./webserv
 ```
 
 The general syntax is:
@@ -83,6 +83,14 @@ The general syntax is:
 ```bash
 ./webserv [configuration_file]
 ```
+
+Provided configuration files:
+
+* `config/default.conf` – full demo of every feature (static site, autoindex, uploads, DELETE, CGI, redirects, second port).
+* `config/example.conf` – annotated example (expects its files under `/var/www`).
+* `config/tester.conf` – configuration for the provided `tester` executable (`./tester http://localhost:8080`).
+
+A location's `root` replaces the location prefix: with `location /assets { root ./website/assets; }`, the URL `/assets/test.txt` maps to `./website/assets/test.txt`.
 
 The configuration file controls things like:
 
